@@ -136,9 +136,15 @@ func localAssignments(f *function, roots []ast.Node) assignments {
 			switch v := n.(type) {
 			case *ast.AssignStmt:
 				if v.Tok == token.ASSIGN || v.Tok == token.DEFINE {
-					for i, lhs := range v.Lhs {
-						if i < len(v.Rhs) {
-							set(lhs, v.Rhs[i])
+					if len(v.Lhs) > len(v.Rhs) {
+						for _, lhs := range v.Lhs {
+							set(lhs, nil)
+						}
+					} else {
+						for i, lhs := range v.Lhs {
+							if i < len(v.Rhs) {
+								set(lhs, v.Rhs[i])
+							}
 						}
 					}
 				} else {
@@ -151,9 +157,15 @@ func localAssignments(f *function, roots []ast.Node) assignments {
 					}
 				}
 			case *ast.ValueSpec:
-				for i, id := range v.Names {
-					if i < len(v.Values) {
-						set(id, v.Values[i])
+				if len(v.Values) > 0 && len(v.Names) > len(v.Values) {
+					for _, id := range v.Names {
+						set(id, nil)
+					}
+				} else {
+					for i, id := range v.Names {
+						if i < len(v.Values) {
+							set(id, v.Values[i])
+						}
 					}
 				}
 			case *ast.IncDecStmt:
@@ -350,6 +362,18 @@ func (ix *index) semantic(c Config) error {
 						}
 					}
 				case *ast.AssignStmt:
+					if (v.Tok == token.ASSIGN || v.Tok == token.DEFINE) && len(v.Lhs) > len(v.Rhs) {
+						for _, lhs := range v.Lhs {
+							if contains(c.EventFields, field(lhs)) {
+								ix.boundaries = append(ix.boundaries, Boundary{
+									Node: id, Kind: "dynamic_event",
+									Reason:   "configured event field receives a selected result from a multi-result expression; its value is unresolved",
+									Evidence: ix.evidence(v.Pos()),
+								})
+							}
+						}
+						break
+					}
 					for i, lhs := range v.Lhs {
 						if !contains(c.EventFields, field(lhs)) {
 							continue
