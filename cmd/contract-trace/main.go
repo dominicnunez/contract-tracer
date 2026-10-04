@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	trace "contract-tracer"
+	trace "github.com/dominicnunez/contract-tracer"
 )
 
 func main() { os.Exit(run()) }

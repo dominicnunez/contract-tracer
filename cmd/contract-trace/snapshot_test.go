@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	trace "contract-tracer"
+	trace "github.com/dominicnunez/contract-tracer"
 )
 
 func TestSaveSnapshotCompressionAndFailedReplacement(t *testing.T) {

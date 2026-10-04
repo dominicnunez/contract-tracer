@@ -9,6 +9,16 @@ Contract Tracer is a standalone Go library and command-line tool for discovering
 
 The target is analyzed, not executed as an application.
 
+## Install
+
+Install the command-line tool with Go 1.27 or newer:
+
+```sh
+go install github.com/dominicnunez/contract-tracer/cmd/contract-trace@latest
+```
+
+The library module is `github.com/dominicnunez/contract-tracer` and its Go package name is `contracttrace`.
+
 ## Build and test
 
 ```sh

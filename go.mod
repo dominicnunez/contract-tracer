@@ -1,4 +1,4 @@
-module contract-tracer
+module github.com/dominicnunez/contract-tracer
 
 go 1.27.0
 
