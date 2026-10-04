@@ -5,14 +5,14 @@ import (
 	"go/ast"
 	"go/types"
 	"strings"
+	"unicode"
 
 	"golang.org/x/tools/go/ssa"
 )
 
 func validateConfig(c Config) error {
 	for _, rule := range c.LifecycleRules {
-		parts := strings.Split(rule.Symbol, "::")
-		if len(parts) != 2 || parts[0] == "" || parts[1] == "" || strings.TrimSpace(rule.Symbol) != rule.Symbol {
+		if !validQualifiedSymbol(rule.Symbol) {
 			return fmt.Errorf("lifecycle rule requires a fully qualified symbol: %q", rule.Symbol)
 		}
 		if rule.Namespace == "" || strings.TrimSpace(rule.Namespace) != rule.Namespace {
@@ -66,8 +66,7 @@ func validateConfig(c Config) error {
 			}
 		}
 		for _, origin := range scope.DatabaseOrigins {
-			parts := strings.Split(origin, "::")
-			if len(parts) != 2 || parts[0] == "" || parts[1] == "" || strings.TrimSpace(origin) != origin {
+			if !validQualifiedSymbol(origin) {
 				return fmt.Errorf("database origin requires a fully qualified function symbol: %q", origin)
 			}
 			if previous := originNamespaces[origin]; previous != "" && previous != scope.Namespace {
@@ -81,13 +80,16 @@ func validateConfig(c Config) error {
 			if strings.TrimSpace(name) == "" {
 				return fmt.Errorf("configuration names must not be empty")
 			}
+			if strings.TrimSpace(name) != name {
+				return fmt.Errorf("configuration names must not have surrounding whitespace")
+			}
 		}
 	}
 	for _, r := range c.CallRules {
 		if strings.TrimSpace(r.Namespace) != r.Namespace {
 			return fmt.Errorf("call-rule namespace must have no surrounding whitespace")
 		}
-		if !strings.Contains(r.Symbol, "::") {
+		if !validQualifiedSymbol(r.Symbol) {
 			return fmt.Errorf("call rule requires a fully qualified symbol: %q", r.Symbol)
 		}
 		if r.Argument < 0 || r.HandlerArgument != nil && *r.HandlerArgument < 0 {
@@ -104,6 +106,15 @@ func validateConfig(c Config) error {
 	}
 	return nil
 }
+
+func validQualifiedSymbol(symbol string) bool {
+	if strings.IndexFunc(symbol, unicode.IsSpace) >= 0 {
+		return false
+	}
+	parts := strings.Split(symbol, "::")
+	return len(parts) == 2 && parts[0] != "" && parts[1] != ""
+}
+
 func callObject(expr ast.Expr, f *function) *types.Func {
 	switch v := expr.(type) {
 	case *ast.Ident:

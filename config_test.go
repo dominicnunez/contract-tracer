@@ -2,6 +2,7 @@ package contracttrace
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -73,3 +74,145 @@ func TestSQLFilePatternsRejectSilentExclusions(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigurationNameWhitespaceRejectedByBothEntrypoints(t *testing.T) {
+	type nameList struct {
+		field     string
+		canonical string
+		set       func(*Config, string)
+	}
+	lists := []nameList{
+		{"sql_methods", "Query", func(c *Config, value string) { c.SQLMethods = []string{value} }},
+		{"event_fields", "EventType", func(c *Config, value string) { c.EventFields = []string{value} }},
+		{"lifecycle_names", "shutdown", func(c *Config, value string) { c.LifecycleNames = []string{value} }},
+	}
+	for _, list := range lists {
+		for _, value := range []string{"", " " + list.canonical, list.canonical + " "} {
+			t.Run(list.field+fmt.Sprintf("/%q", value), func(t *testing.T) {
+				text := fmt.Sprintf(`{"%s":[%q]}`, list.field, value)
+				if _, err := ReadConfig(strings.NewReader(text)); err == nil {
+					t.Errorf("ReadConfig accepted whitespace-padded %s name %q", list.field, value)
+				}
+
+				config := DefaultConfig()
+				list.set(&config, value)
+				_, err := Trace(context.Background(), Options{Root: "testdata/sample", Seeds: []string{"Validate"}, Depth: 1, MaxNodes: 20, Config: config})
+				if err == nil {
+					t.Errorf("Trace accepted whitespace-padded %s name %q", list.field, value)
+				}
+			})
+		}
+
+		text := fmt.Sprintf(`{"%s":[%q]}`, list.field, list.canonical)
+		if _, err := ReadConfig(strings.NewReader(text)); err != nil {
+			t.Errorf("ReadConfig canonical %s name: %v", list.field, err)
+		}
+	}
+
+	config := DefaultConfig()
+	config.SQLMethods = []string{"Query"}
+	config.EventFields = []string{"EventType"}
+	config.LifecycleNames = []string{"shutdown"}
+	if _, err := Trace(context.Background(), Options{Root: "testdata/sample", Seeds: []string{"Validate"}, Depth: 1, MaxNodes: 20, Config: config}); err != nil {
+		t.Fatalf("Trace with canonical configured names: %v", err)
+	}
+}
+
+func TestCallRuleSymbolMustHaveTrimmedQualifiedParts(t *testing.T) {
+	for _, symbol := range []string{
+		" example.com/sample::sendAPI",
+		"example.com/sample::sendAPI ",
+		"example.com/sample ::sendAPI",
+		"example.com/sample:: sendAPI",
+		"::sendAPI",
+		"example.com/sample::",
+		"example.com/sample::sendAPI::extra",
+	} {
+		t.Run(fmt.Sprintf("%q", symbol), func(t *testing.T) {
+			text := fmt.Sprintf(`{"call_rules":[{"symbol":%q,"kind":"event_publish","argument":0}]}`, symbol)
+			if _, err := ReadConfig(strings.NewReader(text)); err == nil {
+				t.Errorf("ReadConfig accepted malformed call-rule symbol %q", symbol)
+			}
+			_, err := Trace(context.Background(), Options{
+				Root: "testdata/sample", Seeds: []string{"Validate"}, Depth: 1, MaxNodes: 20,
+				Config: Config{CallRules: []CallRule{{Symbol: symbol, Kind: "event_publish", Argument: 0}}},
+			})
+			if err == nil {
+				t.Errorf("Trace accepted malformed call-rule symbol %q", symbol)
+			}
+		})
+	}
+
+	const canonical = "example.com/sample::sendAPI"
+	text := fmt.Sprintf(`{"call_rules":[{"symbol":%q,"kind":"event_publish","argument":0}]}`, canonical)
+	if _, err := ReadConfig(strings.NewReader(text)); err != nil {
+		t.Fatalf("ReadConfig canonical call-rule symbol: %v", err)
+	}
+	if _, err := Trace(context.Background(), Options{
+		Root: "testdata/sample", Seeds: []string{"Validate"}, Depth: 1, MaxNodes: 20,
+		Config: Config{CallRules: []CallRule{{Symbol: canonical, Kind: "event_publish", Argument: 0}}},
+	}); err != nil {
+		t.Fatalf("Trace with canonical call-rule symbol: %v", err)
+	}
+}
+
+func TestOtherConfiguredSymbolsRejectWhitespaceWithinQualifiedParts(t *testing.T) {
+	tests := []struct {
+		name      string
+		canonical string
+		json      string
+		configure func(string) Config
+	}{
+		{
+			name:      "lifecycle rule",
+			canonical: "example.com/sample::Acquire",
+			json:      `{"lifecycle_rules":[{"symbol":%q,"role":"acquire","namespace":"leases","identity":"origin","result":0}]}`,
+			configure: func(symbol string) Config {
+				return Config{LifecycleRules: []LifecycleRule{{Symbol: symbol, Role: "acquire", Namespace: "leases", Identity: "origin", Result: intPointer(0)}}}
+			},
+		},
+		{
+			name:      "database origin",
+			canonical: "example.com/sample::OpenPrimary",
+			json:      `{"storage_scopes":[{"namespace":"primary","database_origins":[%q]}]}`,
+			configure: func(symbol string) Config {
+				return Config{StorageScopes: []StorageScope{{Namespace: "primary", DatabaseOrigins: []string{symbol}}}}
+			},
+		},
+	}
+	invalid := []string{
+		" example.com/sample::Acquire",
+		"example.com/sample::Acquire ",
+		"example.com/sample ::Acquire",
+		"example.com/sample:: Acquire",
+		"example.com/sample::Ac quire",
+		"::Acquire",
+		"example.com/sample::",
+		"example.com/sample::Acquire::extra",
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, symbol := range invalid {
+				t.Run(fmt.Sprintf("%q", symbol), func(t *testing.T) {
+					text := fmt.Sprintf(tt.json, symbol)
+					if _, err := ReadConfig(strings.NewReader(text)); err == nil {
+						t.Errorf("ReadConfig accepted malformed %s symbol %q", tt.name, symbol)
+					}
+					_, err := Trace(context.Background(), Options{Root: "testdata/sample", Seeds: []string{"Validate"}, Depth: 1, MaxNodes: 20, Config: tt.configure(symbol)})
+					if err == nil {
+						t.Errorf("Trace accepted malformed %s symbol %q", tt.name, symbol)
+					}
+				})
+			}
+			text := fmt.Sprintf(tt.json, tt.canonical)
+			if _, err := ReadConfig(strings.NewReader(text)); err != nil {
+				t.Errorf("ReadConfig rejected canonical %s symbol: %v", tt.name, err)
+			}
+			if _, err := Trace(context.Background(), Options{Root: "testdata/sample", Seeds: []string{"Validate"}, Depth: 1, MaxNodes: 20, Config: tt.configure(tt.canonical)}); err != nil {
+				t.Errorf("Trace rejected canonical %s symbol: %v", tt.name, err)
+			}
+		})
+	}
+}
+
+func intPointer(value int) *int { return &value }
