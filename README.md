@@ -74,6 +74,8 @@ JSON reports include nodes, source evidence, relationships, coverage, boundaries
 
 The analyzer uses typed Go syntax/SSA and bounded value-flow models. Interface and callback targets may be possible candidates. Reflection, unsafe/cgo, unavailable dependency bodies and unselected build configurations are not fully modeled. Candidate flow is context-insensitive and bounded; it does not establish runtime object identity, invocation pairing, path feasibility, SQL transaction success, event delivery, cleanup success, goroutine scheduling or eventual termination. SQLite storage analysis is built in; other storage systems require configured adapters and their semantics remain unresolved.
 
+SQL file symlinks are not supported. A `.sql` symlink found during source fingerprinting or SQL discovery is rejected, even when a SQL file selector would otherwise exclude it. File reads used for fingerprinting and SQL inventory are rooted under the analysis directory; this does not sandbox Go package loading or the Go toolchain.
+
 ## Contributing
 
 Install Go and Python 3.12 or newer, then install the pinned development hook runner and enable the commit and push checks:

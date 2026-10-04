@@ -64,9 +64,14 @@ func (ix *index) sqlAccesses(owner, query string, evidence Evidence) []sqlFound 
 	return r.found
 }
 func (ix *index) sqlFiles(ctx context.Context, o Options) error {
+	rootFS, err := os.OpenRoot(ix.root)
+	if err != nil {
+		return err
+	}
+	defer rootFS.Close()
 	ix.storage.Files = []string{}
 	ix.storage.ExcludedFiles = []string{}
-	err := filepath.WalkDir(ix.root, func(file string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(ix.root, func(file string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -83,6 +88,9 @@ func (ix *index) sqlFiles(ctx context.Context, o Options) error {
 			return nil
 		}
 		rel, _ := relative(ix.root, file)
+		if d.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("SQL file symlinks are not supported: %s", rel)
+		}
 		selected := false
 		for _, pattern := range o.Config.SQLFiles {
 			if globMatch(pattern, rel) {
@@ -101,7 +109,7 @@ func (ix *index) sqlFiles(ctx context.Context, o Options) error {
 			ix.storage.ExcludedFiles = append(ix.storage.ExcludedFiles, rel)
 			return nil
 		}
-		body, err := os.ReadFile(file)
+		body, err := rootFS.ReadFile(filepath.FromSlash(rel))
 		if err != nil {
 			return err
 		}

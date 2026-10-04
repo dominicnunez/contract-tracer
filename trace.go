@@ -385,8 +385,13 @@ func relative(root, path string) (string, bool) {
 }
 func hashText(s string) string { sum := sha256.Sum256([]byte(s)); return hex.EncodeToString(sum[:]) }
 func fingerprint(root string) (string, []string, error) {
+	rootFS, err := os.OpenRoot(root)
+	if err != nil {
+		return "", nil, err
+	}
+	defer rootFS.Close()
 	files := []string{}
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -397,7 +402,12 @@ func fingerprint(root string) (string, []string, error) {
 			}
 			return nil
 		}
-		if strings.HasSuffix(path, ".go") || strings.HasSuffix(strings.ToLower(path), ".sql") || d.Name() == "go.mod" || d.Name() == "go.sum" {
+		isSQL := strings.HasSuffix(strings.ToLower(path), ".sql")
+		if isSQL && d.Type()&os.ModeSymlink != 0 {
+			rel, _ := relative(root, path)
+			return fmt.Errorf("SQL file symlinks are not supported: %s", rel)
+		}
+		if strings.HasSuffix(path, ".go") || isSQL || d.Name() == "go.mod" || d.Name() == "go.sum" {
 			rel, _ := relative(root, path)
 			files = append(files, rel)
 		}
@@ -409,7 +419,7 @@ func fingerprint(root string) (string, []string, error) {
 	sort.Strings(files)
 	h := sha256.New()
 	for _, f := range files {
-		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(f)))
+		data, err := rootFS.ReadFile(filepath.FromSlash(f))
 		if err != nil {
 			return "", nil, err
 		}
