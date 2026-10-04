@@ -325,9 +325,29 @@ func (ix *index) semantic(c Config) error {
 							}
 						}
 					}
-				case *ast.KeyValueExpr:
-					if contains(c.EventFields, field(v.Key)) {
-						event(v.Value, "event_construct")
+				case *ast.CompositeLit:
+					typ := f.pkg.TypesInfo.TypeOf(v)
+					if typ == nil {
+						break
+					}
+					resolvedType := types.Unalias(typ)
+					if pointer, ok := resolvedType.Underlying().(*types.Pointer); ok {
+						resolvedType = types.Unalias(pointer.Elem())
+					}
+					structType, ok := resolvedType.Underlying().(*types.Struct)
+					if !ok {
+						break
+					}
+					for i, element := range v.Elts {
+						if keyed, ok := element.(*ast.KeyValueExpr); ok {
+							if contains(c.EventFields, field(keyed.Key)) {
+								event(keyed.Value, "event_construct")
+							}
+							continue
+						}
+						if i < structType.NumFields() && contains(c.EventFields, structType.Field(i).Name()) {
+							event(element, "event_construct")
+						}
 					}
 				case *ast.AssignStmt:
 					for i, lhs := range v.Lhs {
