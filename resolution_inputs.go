@@ -12,6 +12,18 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
+var baseBuildEnvironmentKeys = []string{"GOOS", "GOARCH", "GOVERSION", "CGO_ENABLED", "GOFLAGS", "GOWORK"}
+
+var featureBuildEnvironmentKeys = []string{
+	"GO386", "GOAMD64", "GOARM", "GOARM64", "GOMIPS", "GOMIPS64",
+	"GOPPC64", "GORISCV64", "GOWASM", "GOEXPERIMENT", "GOFIPS140",
+}
+
+func buildEnvironmentKeys() []string {
+	keys := append([]string(nil), baseBuildEnvironmentKeys...)
+	return append(keys, featureBuildEnvironmentKeys...)
+}
+
 func captureResolutionInputs(build map[string]string) ([]LoadedSource, error) {
 	work := build["GOWORK"]
 	if work == "" || work == "off" {
@@ -99,8 +111,21 @@ func verifyBuildEnvironment(ctx context.Context, root string, recorded map[strin
 	if err != nil {
 		return err
 	}
-	for _, key := range []string{"GOOS", "GOARCH", "GOVERSION", "CGO_ENABLED", "GOFLAGS", "GOWORK"} {
+	return compareBuildEnvironment(current, recorded)
+}
+
+func compareBuildEnvironment(current, recorded map[string]string) error {
+	for _, key := range baseBuildEnvironmentKeys {
 		if previous, captured := recorded[key]; captured && current[key] != previous {
+			return fmt.Errorf("build/resolution environment changed: %s; rerun analysis", key)
+		}
+	}
+	for _, key := range featureBuildEnvironmentKeys {
+		previous, captured := recorded[key]
+		if !captured {
+			return fmt.Errorf("saved analysis is missing required build feature setting %s; rerun analysis", key)
+		}
+		if current[key] != previous {
 			return fmt.Errorf("build/resolution environment changed: %s; rerun analysis", key)
 		}
 	}

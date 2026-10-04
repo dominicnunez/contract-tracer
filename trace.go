@@ -429,7 +429,9 @@ func fingerprint(root string) (string, []string, error) {
 	return hex.EncodeToString(h.Sum(nil)), files, nil
 }
 func buildEnvironment(ctx context.Context, root string) (map[string]string, error) {
-	cmd := exec.CommandContext(ctx, "go", "env", "-json", "GOOS", "GOARCH", "GOVERSION", "CGO_ENABLED", "GOFLAGS", "GOWORK")
+	keys := buildEnvironmentKeys()
+	args := append([]string{"env", "-json"}, keys...)
+	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = root
 	b, err := cmd.Output()
 	if err != nil {
@@ -439,7 +441,7 @@ func buildEnvironment(ctx context.Context, root string) (map[string]string, erro
 	if err := json.Unmarshal(b, &values); err != nil {
 		return nil, fmt.Errorf("unexpected go env output: %w", err)
 	}
-	for _, key := range []string{"GOOS", "GOARCH", "GOVERSION", "CGO_ENABLED", "GOFLAGS", "GOWORK"} {
+	for _, key := range keys {
 		if _, present := values[key]; !present {
 			return nil, fmt.Errorf("go env output missing %s", key)
 		}

@@ -70,7 +70,7 @@ Lifecycle rules map one typed selector (`argument`, `result`, or `receiver`) to 
 
 ## Output and limits
 
-JSON reports include nodes, source evidence, relationships, coverage, boundaries and `contract_complete: false`. Markdown is a summary. Saved analysis can be written as JSON or gzip JSON using a `.gz` suffix; resume validates the saved graph and source/build inputs before exploring it with new seeds, locations, focus or budgets.
+JSON reports include nodes, source evidence, relationships, coverage, boundaries and `contract_complete: false`. Markdown is a summary. Saved analysis can be written as JSON or gzip JSON using a `.gz` suffix; resume validates the saved graph and source/build inputs before exploring it with new seeds, locations, focus or budgets. Build identity includes Go architecture feature settings, `GOEXPERIMENT` and `GOFIPS140`; snapshots missing those settings or reopened under a different setting must be regenerated.
 
 The analyzer uses typed Go syntax/SSA and bounded value-flow models. Interface and callback targets may be possible candidates. Reflection, unsafe/cgo, unavailable dependency bodies and unselected build configurations are not fully modeled. Candidate flow is context-insensitive and bounded; it does not establish runtime object identity, invocation pairing, path feasibility, SQL transaction success, event delivery, cleanup success, goroutine scheduling or eventual termination. SQLite storage analysis is built in; other storage systems require configured adapters and their semantics remain unresolved.
 
