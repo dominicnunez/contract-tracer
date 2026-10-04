@@ -107,11 +107,15 @@ func Explore(ctx context.Context, a Analysis, o ExploreOptions) (Report, error) 
 	if o.Depth < 1 || o.MaxNodes < 1 {
 		return Report{}, fmt.Errorf("depth and max-nodes must be positive")
 	}
-	before, _, err := fingerprint(a.Root)
+	root, err := canonicalRoot(a.Root)
+	if err != nil {
+		return Report{}, fmt.Errorf("saved analysis root: %w", err)
+	}
+	before, _, err := fingerprint(root)
 	if err != nil {
 		return Report{}, err
 	}
-	assets, err := hashFiles(a.Root, a.Coverage.EmbeddedFiles)
+	assets, err := hashFiles(root, a.Coverage.EmbeddedFiles)
 	if err != nil {
 		return Report{}, err
 	}
@@ -130,7 +134,7 @@ func Explore(ctx context.Context, a Analysis, o ExploreOptions) (Report, error) 
 	if err := verifyLoadedSources(ctx, a.Coverage.ResolutionInputs); err != nil {
 		return Report{}, fmt.Errorf("resolution input check: %w", err)
 	}
-	if err := verifyBuildEnvironment(ctx, a.Root, a.Coverage.Build); err != nil {
+	if err := verifyBuildEnvironment(ctx, root, a.Coverage.Build); err != nil {
 		return Report{}, err
 	}
 	if a.Coverage.ResolutionScope == "workspace_modules.v1" {
@@ -142,7 +146,7 @@ func Explore(ctx context.Context, a Analysis, o ExploreOptions) (Report, error) 
 			return Report{}, fmt.Errorf("workspace module inventory changed; rerun analysis")
 		}
 	}
-	ix := &index{root: a.Root, funcs: map[string]*function{}, edges: a.Relationships, boundaries: a.Boundaries, ranges: a.Ranges, declarationRanges: a.DeclarationRanges}
+	ix := &index{root: root, funcs: map[string]*function{}, edges: a.Relationships, boundaries: a.Boundaries, ranges: a.Ranges, declarationRanges: a.DeclarationRanges}
 	for _, n := range a.Nodes {
 		n.Distance = 0
 		n.ReachedBy = nil
@@ -162,7 +166,7 @@ func Explore(ctx context.Context, a Analysis, o ExploreOptions) (Report, error) 
 		return Report{}, err
 	}
 	report.Schema = "contract-tracer.v0.1"
-	report.Root = a.Root
+	report.Root = root
 	report.Config = a.Config
 	report.Invariant = o.Invariant
 	if report.Invariant == "" {

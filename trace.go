@@ -67,7 +67,7 @@ func Trace(ctx context.Context, o Options) (report Report, err error) {
 	if err := validateConfig(o.Config); err != nil {
 		return Report{}, err
 	}
-	root, err := filepath.Abs(o.Root)
+	root, err := canonicalRoot(o.Root)
 	if err != nil {
 		return report, err
 	}
@@ -308,6 +308,19 @@ func Trace(ctx context.Context, o Options) (report Report, err error) {
 	}
 	return report, nil
 }
+
+func canonicalRoot(root string) (string, error) {
+	absolute, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(resolved), nil
+}
+
 func functionName(obj *types.Func) string {
 	sig, _ := obj.Type().(*types.Signature)
 	if sig != nil && sig.Recv() != nil {
