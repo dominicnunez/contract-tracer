@@ -11,7 +11,7 @@ import (
 func TestOutsideAggregateErrorsRetainOriginsAndPrivateControl(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
-		"go.mod": "module example.com/aggregateerrors\n\ngo 1.26.0\n",
+		"go.mod": "module example.com/aggregateerrors\n\ngo 1.27.0\n",
 		"input.go": `package aggregateerrors
 import "errors"
 type Record struct { E error; Next *Record; hidden error }

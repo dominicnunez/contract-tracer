@@ -11,7 +11,7 @@ import (
 func TestOutsideErrorInputsKeepKnownOriginsAndPrivateControl(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
-		"go.mod": "module example.com/errorinputs\n\ngo 1.26.0\n",
+		"go.mod": "module example.com/errorinputs\n\ngo 1.27.0\n",
 		"input.go": `package errorinputs
 import "errors"
 func source() error { return errors.New("local") }

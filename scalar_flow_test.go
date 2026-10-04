@@ -11,7 +11,7 @@ import (
 func TestScalarOriginsCrossArithmeticStorageCallsAndDecisions(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
-		"go.mod": "module example.com/scalars\n\ngo 1.26.0\n",
+		"go.mod": "module example.com/scalars\n\ngo 1.27.0\n",
 		"flow.go": `package scalars
 type Account struct { Count int }
 func Adjust(n int) int { return n + 1 }

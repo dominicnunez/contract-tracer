@@ -53,7 +53,7 @@ func TestSavedAnalysisExpandsBeyondFirstScope(t *testing.T) {
 
 func TestSavedAnalysisRejectsChangedSource(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/snapshot\n\ngo 1.26.0\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/snapshot\n\ngo 1.27.0\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	source := filepath.Join(root, "main.go")

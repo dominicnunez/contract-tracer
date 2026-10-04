@@ -12,7 +12,7 @@ import (
 func TestScalarOutsideResultsAndAssertionsKeepOrigins(t *testing.T) {
 	root := t.TempDir()
 	for name, contents := range map[string]string{
-		"go.mod": "module example.com/scalaroutside\n\ngo 1.26.0\n",
+		"go.mod": "module example.com/scalaroutside\n\ngo 1.27.0\n",
 		"outside.go": `package scalaroutside
 import "strconv"
 type Count int
@@ -68,7 +68,7 @@ func TestScalarOverflowDisclosesLostOriginsAtConsumer(t *testing.T) {
 				args = append(args, "1")
 			}
 			source := "package scalarcap\nfunc total(" + strings.Join(parameters, ",") + ") int { return " + strings.Join(terms, "+") + " }\nfunc Entry() int { return total(" + strings.Join(args, ",") + ") }\n"
-			if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/scalarcap\n\ngo 1.26.0\n"), 0644); err != nil {
+			if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/scalarcap\n\ngo 1.27.0\n"), 0644); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(root, "cap.go"), []byte(source), 0644); err != nil {
@@ -109,7 +109,7 @@ func TestScalarOverflowDisclosesLostOriginsAtConsumer(t *testing.T) {
 func TestScalarBuiltinResultsAndNumericArguments(t *testing.T) {
 	root := t.TempDir()
 	for name, contents := range map[string]string{
-		"go.mod": "module example.com/scalarbuiltins\n\ngo 1.26.0\n",
+		"go.mod": "module example.com/scalarbuiltins\n\ngo 1.27.0\n",
 		"builtin.go": `package scalarbuiltins
 func Length(values []int) int { return len(values) }
 func Capacity(ch chan int) int { return cap(ch) }

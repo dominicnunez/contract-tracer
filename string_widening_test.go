@@ -27,7 +27,7 @@ func TestStringWideningKeepsPossibleWrappingCause(t *testing.T) {
 				last = "z wrapping: %w"
 			}
 			fmt.Fprintf(&source, "default: return %q\n} }\nfunc Wrap(n int) error { return fmt.Errorf(AFormats(n), cause()) }\n", last)
-			if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/widening\n\ngo 1.26.0\n"), 0644); err != nil {
+			if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/widening\n\ngo 1.27.0\n"), 0644); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(root, "main.go"), []byte(source.String()), 0644); err != nil {

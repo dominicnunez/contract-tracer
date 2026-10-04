@@ -11,7 +11,7 @@ import (
 func TestContextDoneTracksBoundAndMethodExpressionReceivers(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
-		"go.mod": "module example.com/contextdoneprobe\n\ngo 1.26.0\n",
+		"go.mod": "module example.com/contextdoneprobe\n\ngo 1.27.0\n",
 		"context.go": `package contextdoneprobe
 import (
 	"context"

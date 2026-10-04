@@ -75,7 +75,7 @@ func TestFingerprintIncludesOrdinaryPackageDirectories(t *testing.T) {
 
 func TestInvalidTargetAndCanceledAnalysis(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/broken\n\ngo 1.26.0\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/broken\n\ngo 1.27.0\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "broken.go"), []byte("package broken\nfunc Seed() { missingSymbol() }\n"), 0600); err != nil {

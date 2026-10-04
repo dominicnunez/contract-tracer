@@ -11,7 +11,7 @@ import (
 func TestOutsideChannelsKeepContentsLifecycleAndPrivateControl(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
-		"go.mod": "module example.com/channelinputs\n\ngo 1.26.0\n",
+		"go.mod": "module example.com/channelinputs\n\ngo 1.27.0\n",
 		"channels.go": `package channelinputs
 import ("errors"; "database/sql")
 func source() error { return errors.New("local") }

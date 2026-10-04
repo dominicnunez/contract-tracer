@@ -109,7 +109,7 @@ func TestInterfaceWithoutLocalImplementationExposesBoundary(t *testing.T) {
 
 func TestInterfaceCandidateBudgetIsDisclosed(t *testing.T) {
 	root := t.TempDir()
-	module := "module example.com/interfacebudget\n\ngo 1.26.0\n"
+	module := "module example.com/interfacebudget\n\ngo 1.27.0\n"
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(module), 0600); err != nil {
 		t.Fatal(err)
 	}

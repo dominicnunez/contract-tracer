@@ -10,7 +10,7 @@ import (
 func TestPrivateFieldConnectsSiblingEntryPointsAndConstructors(t *testing.T) {
 	root := t.TempDir()
 	for name, contents := range map[string]string{
-		"go.mod": "module example.com/fields\n\ngo 1.26.0\n",
+		"go.mod": "module example.com/fields\n\ngo 1.27.0\n",
 		"fields.go": `package fields
 type Counter struct { remaining int; other int }
 func New(n int) *Counter {return &Counter{remaining:n}}
@@ -69,7 +69,7 @@ func (d *Different) Read() int {return d.remaining}
 func TestFieldShapesPreserveDefinitionsAndAccessRoles(t *testing.T) {
 	root := t.TempDir()
 	for name, contents := range map[string]string{
-		"go.mod": "module example.com/fieldshapes\n\ngo 1.26.0\n",
+		"go.mod": "module example.com/fieldshapes\n\ngo 1.27.0\n",
 		"shapes.go": `package fieldshapes
 type State[T any] struct { count int; values []int }
 type Alias = State[int]
@@ -129,7 +129,7 @@ var Shared=State[int]{count:1}
 func TestRecordAccessDistinguishesCopiesPointersAndShadowedBuiltins(t *testing.T) {
 	root := t.TempDir()
 	for name, contents := range map[string]string{
-		"go.mod": "module example.com/recordroles\n\ngo 1.26.0\n",
+		"go.mod": "module example.com/recordroles\n\ngo 1.27.0\n",
 		"roles.go": `package recordroles
 type State struct { count int }
 func consume(State) {}

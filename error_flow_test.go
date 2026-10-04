@@ -12,7 +12,7 @@ import (
 func TestErrorResultInvestigationFlow(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
-		"go.mod": "module example.com/errorflow\n\ngo 1.26.0\n",
+		"go.mod": "module example.com/errorflow\n\ngo 1.27.0\n",
 		"error.go": `package errorflow
 import "errors"
 func fail() error { return errors.New("failure") }
@@ -98,7 +98,7 @@ func SeedInterface() bool { return Interface(localProvider{}) }
 
 func TestRecursiveErrorForwardingDoesNotInventDistinctOrigins(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/recursiveerror\n\ngo 1.26.0\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/recursiveerror\n\ngo 1.27.0\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	source := "package recursiveerror\nimport \"errors\"\nfunc Recurse(n int) error {\nif n == 0 { return errors.New(\"failure\") }\n"

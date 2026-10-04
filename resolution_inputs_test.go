@@ -16,13 +16,13 @@ func TestWorkspaceDependencySwitchRejectsSavedAnalysis(t *testing.T) {
 		}
 	}
 	files := map[string]string{
-		"app/go.mod":           "module example.com/app\n\ngo 1.26.0\n\nrequire example.com/dependency v0.0.0\n",
+		"app/go.mod":           "module example.com/app\n\ngo 1.27.0\n\nrequire example.com/dependency v0.0.0\n",
 		"app/app.go":           "package app\nimport \"example.com/dependency\"\nfunc Seed() { _ = dependency.Marker() }\n",
-		"first/go.mod":         "module example.com/dependency\n\ngo 1.26.0\n",
+		"first/go.mod":         "module example.com/dependency\n\ngo 1.27.0\n",
 		"first/dependency.go":  "package dependency\nfunc Marker() int { return 1 }\n",
-		"second/go.mod":        "module example.com/dependency\n\ngo 1.26.0\n",
+		"second/go.mod":        "module example.com/dependency\n\ngo 1.27.0\n",
 		"second/dependency.go": "package dependency\nfunc Marker() int { return 2 }\n",
-		"go.work":              "go 1.26.0\nuse (\n ./app\n ./first\n)\n",
+		"go.work":              "go 1.27.0\nuse (\n ./app\n ./first\n)\n",
 	}
 	for file, contents := range files {
 		if err := os.WriteFile(filepath.Join(base, filepath.FromSlash(file)), []byte(contents), 0644); err != nil {
@@ -51,7 +51,7 @@ func TestWorkspaceDependencySwitchRejectsSavedAnalysis(t *testing.T) {
 	if err := corrupt.validate(); err == nil {
 		t.Fatal("workspace inventory removed without rejection")
 	}
-	if err := os.WriteFile(work, []byte("go 1.26.0\nuse (\n ./app\n ./second\n)\n"), 0644); err != nil {
+	if err := os.WriteFile(work, []byte("go 1.27.0\nuse (\n ./app\n ./second\n)\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	_, err = Explore(context.Background(), saved, ExploreOptions{Seeds: []string{"Seed"}, Depth: 1, MaxNodes: 20})
@@ -63,15 +63,15 @@ func TestWorkspaceDependencySwitchRejectsSavedAnalysis(t *testing.T) {
 func TestWorkspaceModuleReplacementRejectsSavedAnalysis(t *testing.T) {
 	base := t.TempDir()
 	files := map[string]string{
-		"app/go.mod":               "module example.com/app\n\ngo 1.26.0\nrequire example.com/dependency v0.0.0\nreplace example.com/dependency => ../dependency\n",
+		"app/go.mod":               "module example.com/app\n\ngo 1.27.0\nrequire example.com/dependency v0.0.0\nreplace example.com/dependency => ../dependency\n",
 		"app/app.go":               "package app\nimport \"example.com/dependency\"\nfunc Seed() { _ = dependency.Marker() }\n",
-		"dependency/go.mod":        "module example.com/dependency\n\ngo 1.26.0\nrequire example.com/leaf v0.0.0\nreplace example.com/leaf => ../first\n",
+		"dependency/go.mod":        "module example.com/dependency\n\ngo 1.27.0\nrequire example.com/leaf v0.0.0\nreplace example.com/leaf => ../first\n",
 		"dependency/dependency.go": "package dependency\nimport \"example.com/leaf\"\nfunc Marker() int { return leaf.Value() }\n",
-		"first/go.mod":             "module example.com/leaf\n\ngo 1.26.0\n",
+		"first/go.mod":             "module example.com/leaf\n\ngo 1.27.0\n",
 		"first/leaf.go":            "package leaf\nfunc Value() int { return 1 }\n",
-		"second/go.mod":            "module example.com/leaf\n\ngo 1.26.0\n",
+		"second/go.mod":            "module example.com/leaf\n\ngo 1.27.0\n",
 		"second/leaf.go":           "package leaf\nfunc Value() int { return 2 }\n",
-		"go.work":                  "go 1.26.0\nuse (\n ./app\n ./dependency\n)\n",
+		"go.work":                  "go 1.27.0\nuse (\n ./app\n ./dependency\n)\n",
 	}
 	for file, contents := range files {
 		path := filepath.Join(base, filepath.FromSlash(file))
@@ -107,9 +107,9 @@ func TestWorkspaceModuleReplacementRejectsSavedAnalysis(t *testing.T) {
 func TestDependencyLanguageDirectiveRejectsSavedAnalysis(t *testing.T) {
 	base := t.TempDir()
 	files := map[string]string{
-		"app/go.mod":               "module example.com/app\n\ngo 1.26.0\nrequire example.com/dependency v0.0.0\nreplace example.com/dependency => ../dependency\n",
+		"app/go.mod":               "module example.com/app\n\ngo 1.27.0\nrequire example.com/dependency v0.0.0\nreplace example.com/dependency => ../dependency\n",
 		"app/app.go":               "package app\nimport \"example.com/dependency\"\nfunc Seed() { _ = dependency.Marker[int](1) }\n",
-		"dependency/go.mod":        "module example.com/dependency\n\ngo 1.26.0\n",
+		"dependency/go.mod":        "module example.com/dependency\n\ngo 1.27.0\n",
 		"dependency/dependency.go": "package dependency\nfunc Marker[T any](value T) T { return value }\n",
 	}
 	for file, contents := range files {

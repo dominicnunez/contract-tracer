@@ -11,8 +11,8 @@ import (
 func TestConfiguredCallRulesFollowTypedAliasesAndMethodExpressions(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
-		"go.mod":     "module example.com/callclient\n\ngo 1.26.0\nrequire example.com/callapi v0.0.0\nreplace example.com/callapi => ./api\n",
-		"api/go.mod": "module example.com/callapi\n\ngo 1.26.0\n",
+		"go.mod":     "module example.com/callclient\n\ngo 1.27.0\nrequire example.com/callapi v0.0.0\nreplace example.com/callapi => ./api\n",
+		"api/go.mod": "module example.com/callapi\n\ngo 1.27.0\n",
 		"api/api.go": `package callapi
 type Bus struct{}
 type Publisher interface { Publish(string, string) }

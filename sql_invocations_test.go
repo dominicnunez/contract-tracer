@@ -67,7 +67,7 @@ func SQLFamily() {
 	if err := os.MkdirAll(root, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/sqlfamily\n\ngo 1.26.0\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/sqlfamily\n\ngo 1.27.0\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "family.go"), []byte(source), 0600); err != nil {

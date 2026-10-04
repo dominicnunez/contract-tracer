@@ -31,7 +31,7 @@ func MapRecordKnownKey() { values := map[string]holder{"known": {task: knownTask
 func ArrayRecordExplicitNil(index int) { values := [2]holder{{task: knownTask}, {task: nil}}; var group sync.WaitGroup; group.Go(values[index].task) }
 func NilParentPointer() { var parent *holder; var group sync.WaitGroup; group.Go(parent.task) }
 `
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/recordnil\n\ngo 1.26.0\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/recordnil\n\ngo 1.27.0\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "records.go"), []byte(source), 0600); err != nil {

@@ -10,7 +10,7 @@ import (
 func TestValueReceiverCopiesDistinguishPointersAndMethodExpressions(t *testing.T) {
 	root := t.TempDir()
 	for name, contents := range map[string]string{
-		"go.mod": "module example.com/receivers\n\ngo 1.26.0\n",
+		"go.mod": "module example.com/receivers\n\ngo 1.27.0\n",
 		"receivers.go": `package receivers
 type State struct { count int }
 func (State) Value() {}

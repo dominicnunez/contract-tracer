@@ -11,7 +11,7 @@ import (
 func TestErrorWrappingRetainsCausesAndFormattingControls(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
-		"go.mod": "module example.com/errorwrap\n\ngo 1.26.0\n",
+		"go.mod": "module example.com/errorwrap\n\ngo 1.27.0\n",
 		"wrap.go": `package errorwrap
 import ("errors"; "fmt")
 func cause() error { return errors.New("cause") }

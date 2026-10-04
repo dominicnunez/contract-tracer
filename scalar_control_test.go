@@ -11,7 +11,7 @@ import (
 func TestScalarBranchSelectionReachesReturnsAndCallers(t *testing.T) {
 	root := t.TempDir()
 	for name, contents := range map[string]string{
-		"go.mod": "module example.com/control\n\ngo 1.26.0\n",
+		"go.mod": "module example.com/control\n\ngo 1.27.0\n",
 		"control.go": `package control
 func choose(n int) bool { if n > 0 { return true }; return false }
 func Caller(n int) bool { return choose(n) }

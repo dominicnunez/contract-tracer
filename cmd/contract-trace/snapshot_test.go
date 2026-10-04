@@ -11,7 +11,7 @@ import (
 
 func TestSaveSnapshotCompressionAndFailedReplacement(t *testing.T) {
 	root := t.TempDir()
-	for name, contents := range map[string]string{"go.mod": "module example.com/snapshotcli\n\ngo 1.26.0\n", "source.go": "package snapshotcli\nfunc Validate(n int) bool {return n>0}\n"} {
+	for name, contents := range map[string]string{"go.mod": "module example.com/snapshotcli\n\ngo 1.27.0\n", "source.go": "package snapshotcli\nfunc Validate(n int) bool {return n>0}\n"} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0644); err != nil {
 			t.Fatal(err)
 		}

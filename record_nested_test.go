@@ -43,7 +43,7 @@ func Pointer(b *Budget) *Budget { return b }
 func Slice(b []Budget) []Budget { return b }
 func EmptyArray(b [0]Budget) [0]Budget { return b }
 `
-	for name, contents := range map[string]string{"go.mod": "module example.com/nested\n\ngo 1.26.0\n", "nested.go": source} {
+	for name, contents := range map[string]string{"go.mod": "module example.com/nested\n\ngo 1.27.0\n", "nested.go": source} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0600); err != nil {
 			t.Fatal(err)
 		}

@@ -62,9 +62,9 @@ func TestLocalDependencyEditChangesAnalysisIdentity(t *testing.T) {
 		}
 	}
 	files := map[string]string{
-		filepath.Join(root, "go.mod"):              "module example.com/app\n\ngo 1.26.0\n\nrequire example.com/dependency v0.0.0\nreplace example.com/dependency => ../dependency\n",
+		filepath.Join(root, "go.mod"):              "module example.com/app\n\ngo 1.27.0\n\nrequire example.com/dependency v0.0.0\nreplace example.com/dependency => ../dependency\n",
 		filepath.Join(root, "app.go"):              "package app\nimport \"example.com/dependency\"\nfunc Seed() { _ = dependency.Marker() }\n",
-		filepath.Join(dependency, "go.mod"):        "module example.com/dependency\n\ngo 1.26.0\n",
+		filepath.Join(dependency, "go.mod"):        "module example.com/dependency\n\ngo 1.27.0\n",
 		filepath.Join(dependency, "dependency.go"): "package dependency\nfunc Marker() int { return 1 }\n",
 	}
 	for path, contents := range files {

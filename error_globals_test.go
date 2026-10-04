@@ -11,7 +11,7 @@ import (
 func TestPublicErrorGlobalsKeepReplacementAndAliasedContents(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
-		"go.mod": "module example.com/errorglobals\n\ngo 1.26.0\n",
+		"go.mod": "module example.com/errorglobals\n\ngo 1.27.0\n",
 		"global.go": `package errorglobals
 import "errors"
 func source() error { return errors.New("local") }

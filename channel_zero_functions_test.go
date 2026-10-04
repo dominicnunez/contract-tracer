@@ -10,7 +10,7 @@ import (
 
 func TestClosedChannelZeroCallbackCandidatesKeepSourceAndKnownAlternatives(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/channelzero\n\ngo 1.26.0\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/channelzero\n\ngo 1.27.0\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	source := `package channelzero

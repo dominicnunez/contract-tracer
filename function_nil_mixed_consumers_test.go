@@ -11,8 +11,8 @@ import (
 func TestCallbackConsumersExplainNilAndOutsideAlternativesTogether(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
-		"go.mod":     "module example.com/mixedcallbacks\n\ngo 1.26.0\nrequire example.com/callbackapi v0.0.0\nreplace example.com/callbackapi => ./api\n",
-		"api/go.mod": "module example.com/callbackapi\n\ngo 1.26.0\n",
+		"go.mod":     "module example.com/mixedcallbacks\n\ngo 1.27.0\nrequire example.com/callbackapi v0.0.0\nreplace example.com/callbackapi => ./api\n",
+		"api/go.mod": "module example.com/callbackapi\n\ngo 1.27.0\n",
 		"api/api.go": `package callbackapi
 func Subscribe(string, func()) {}
 type Lease struct{}

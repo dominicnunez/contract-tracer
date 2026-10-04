@@ -10,7 +10,7 @@ import (
 func TestImplicitRecordResultsAndBindingsRetainFieldRoles(t *testing.T) {
 	root := t.TempDir()
 	for name, contents := range map[string]string{
-		"go.mod": "module example.com/implicitrecords\n\ngo 1.26.0\n",
+		"go.mod": "module example.com/implicitrecords\n\ngo 1.27.0\n",
 		"records.go": `package implicitrecords
 type State struct { count int }
 type Other struct { flag bool }

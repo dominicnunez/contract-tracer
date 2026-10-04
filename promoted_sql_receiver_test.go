@@ -13,7 +13,7 @@ func TestSQLCallRuleProjectsPromotedMethodExpressionReceiver(t *testing.T) {
 	files := map[string]string{
 		"go.mod": `module example.com/promotedsqltest
 
-go 1.26.0
+go 1.27.0
 `,
 		"client.go": `package promotedsqltest
 import "database/sql"

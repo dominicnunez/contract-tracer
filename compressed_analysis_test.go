@@ -82,7 +82,7 @@ func (analysisFailWriter) Write([]byte) (int, error) { return 0, errors.New("wri
 
 func TestCompressedAnalysisStillRejectsChangedSource(t *testing.T) {
 	root := t.TempDir()
-	for name, contents := range map[string]string{"go.mod": "module example.com/compressed\n\ngo 1.26.0\n", "source.go": "package compressed\nfunc Validate(n int) bool {return n>0}\n"} {
+	for name, contents := range map[string]string{"go.mod": "module example.com/compressed\n\ngo 1.27.0\n", "source.go": "package compressed\nfunc Validate(n int) bool {return n>0}\n"} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0644); err != nil {
 			t.Fatal(err)
 		}

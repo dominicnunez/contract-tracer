@@ -13,7 +13,7 @@ func TestBuiltinSQLCloseTracksBoundAndMethodExpressionReceivers(t *testing.T) {
 	files := map[string]string{
 		"go.mod": `module example.com/sqlcloseadapters
 
-go 1.26.0
+go 1.27.0
 `,
 		"adapters.go": `package sqlcloseadapters
 import "database/sql"

@@ -13,7 +13,7 @@ import (
 func TestRecordFieldLocationSurvivesSerializationAndRetainsUsers(t *testing.T) {
 	root := t.TempDir()
 	for name, contents := range map[string]string{
-		"go.mod": "module example.com/fieldlocation\n\ngo 1.26.0\n",
+		"go.mod": "module example.com/fieldlocation\n\ngo 1.27.0\n",
 		"state.go": `package fieldlocation
 type Counter struct {
  remaining [
@@ -208,7 +208,7 @@ func TestPrivateGlobalLocationDiscoversReadersAndWriters(t *testing.T) {
 func TestRecordFieldLocationRejectsGroupedDeclarationAmbiguity(t *testing.T) {
 	root := t.TempDir()
 	for name, contents := range map[string]string{
-		"go.mod":    "module example.com/groupedfields\n\ngo 1.26.0\n",
+		"go.mod":    "module example.com/groupedfields\n\ngo 1.27.0\n",
 		"fields.go": "package groupedfields\ntype Pair struct {\n first, second [\n 2]int\n}\nfunc Read(p *Pair) int { return p.first[0] + p.second[0] }\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0644); err != nil {
