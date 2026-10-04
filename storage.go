@@ -82,6 +82,16 @@ func (ix *index) sqlFiles(ctx context.Context, o Options) error {
 			if d.Name() == ".git" || d.Name() == "vendor" || d.Name() == ".gograph" {
 				return filepath.SkipDir
 			}
+			// A selected Root follows one Go module tree; SQL selectors do not
+			// extend the inventory into a nested module.
+			if filepath.Clean(file) != filepath.Clean(ix.root) {
+				manifest := filepath.Join(file, "go.mod")
+				if info, err := os.Stat(manifest); err == nil && !info.IsDir() {
+					return filepath.SkipDir
+				} else if err != nil && !os.IsNotExist(err) {
+					return err
+				}
+			}
 			return nil
 		}
 		if !strings.HasSuffix(strings.ToLower(file), ".sql") {

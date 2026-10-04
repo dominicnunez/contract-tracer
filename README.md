@@ -47,6 +47,8 @@ Important options include `-tests`, `-tags`, `-expand-callbacks`, `-timeout`, `-
 
 `-config config.json` accepts one strict JSON object. Unknown fields, invalid selectors and unsupported rule kinds are errors. Omitted fields keep defaults; explicitly setting an array to `[]` disables that default list. Call and lifecycle symbols use `<Go import path>::<declared function or method>`. A storage scope's `database_origins` may also use `<Go import path>::(package init)` for a database constructor declared in a package-level variable initializer.
 
+Each `-root` selects one Go module tree. SQL inventory stops at a nested directory containing another `go.mod`, even if a configured `sql_files` glob matches files below it. Analyze a nested module separately by selecting its directory as `-root`.
+
 Configured call rules describe typed SQL or event API signatures. Argument indexes exclude a method receiver; `handler_argument` is valid for `event_subscribe`.
 
 ```json
@@ -74,7 +76,7 @@ JSON reports include nodes, source evidence, relationships, coverage, boundaries
 
 The analyzer uses typed Go syntax/SSA and bounded value-flow models. Interface and callback targets may be possible candidates. Reflection, unsafe/cgo, unavailable dependency bodies and unselected build configurations are not fully modeled. Candidate flow is context-insensitive and bounded; it does not establish runtime object identity, invocation pairing, path feasibility, SQL transaction success, event delivery, cleanup success, goroutine scheduling or eventual termination. SQLite storage analysis is built in; other storage systems require configured adapters and their semantics remain unresolved.
 
-SQL file symlinks are not supported. A `.sql` symlink found during source fingerprinting or SQL discovery is rejected, even when a SQL file selector would otherwise exclude it. File reads used for fingerprinting and SQL inventory are rooted under the analysis directory; this does not sandbox Go package loading or the Go toolchain.
+SQL file symlinks are not supported. A `.sql` symlink found during source fingerprinting or SQL discovery is rejected, even when a SQL file selector would otherwise exclude it or the file is under a nested module. Source fingerprinting remains conservative across the selected directory tree, excluding `.git`, `vendor` and `.gograph`, and includes descendant Go files, SQL files and `go.mod`/`go.sum` manifests. Changes to nested-module files can therefore invalidate a saved analysis even though nested SQL is outside that root's SQL inventory. Go sources loaded from workspaces or replacements and their module inputs are also checked through separate source and resolution identities. File reads used for fingerprinting and SQL inventory are rooted under the analysis directory; this does not sandbox Go package loading or the Go toolchain.
 
 ## Contributing
 
