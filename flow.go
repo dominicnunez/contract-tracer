@@ -88,7 +88,7 @@ type flowAnalysis struct {
 	callTargets               map[token.Pos]flowValue
 	coverage                  FlowCoverage
 	special                   map[*ssa.Call][]flowValue
-	contexts                  map[*ssa.Call]contextSite
+	contexts                  map[ssa.CallInstruction]contextSite
 	contextKeys               map[string]contextSite
 	doneChannels              map[string]string
 	invokes                   map[*ssa.CallCommon]map[*ssa.Function]bool
@@ -934,6 +934,8 @@ func (ix *index) analyzeFlow(ctx context.Context, prog *ssa.Program, graph *call
 						}
 					case *ssa.Defer:
 						a.modelAfterFunc(v, ix)
+						a.modelContext(v, ix)
+						a.modelSQLHandle(v, ix)
 						if a.sliceBuiltin(v, ix, &result) {
 							changed = true
 						}
@@ -945,6 +947,8 @@ func (ix *index) analyzeFlow(ctx context.Context, prog *ssa.Program, graph *call
 						}
 					case *ssa.Go:
 						a.modelAfterFunc(v, ix)
+						a.modelContext(v, ix)
+						a.modelSQLHandle(v, ix)
 						if a.sliceBuiltin(v, ix, &result) {
 							changed = true
 						}
@@ -1121,7 +1125,14 @@ func (ix *index) analyzeFlow(ctx context.Context, prog *ssa.Program, graph *call
 	a.doneRelationships(ix)
 	for _, key := range sortedKeys(a.sqlHandles) {
 		site := a.sqlHandles[key]
-		ix.edge(site.owner, key, "sql_handle_create", "fact", site.position)
+		ix.edge(site.owner, key, "sql_handle_create", site.certainty, site.position)
+		if site.discarded {
+			ix.boundaries = append(ix.boundaries, Boundary{
+				Node: site.owner, Kind: "discarded_sql_handle",
+				Reason:   "go or deferred database/sql constructor discards its returned handle; this allocation candidate does not prove execution or provide a local cleanup receiver",
+				Evidence: site.discardEvidence,
+			})
+		}
 		if len(site.originals) > 0 {
 			linked := false
 			for _, candidate := range sortedSSAValues(site.originals) {

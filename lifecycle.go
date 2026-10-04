@@ -13,13 +13,16 @@ type contextSite struct {
 	key, owner, name string
 	names            []string
 	position         token.Pos
+	certainty        string
 	needsCancel      bool
 	parent           ssa.Value
 }
 
-func (a *flowAnalysis) modelContext(call *ssa.Call, ix *index) {
-	a.modelAfterFunc(call, ix)
-	a.modelDone(call, ix)
+func (a *flowAnalysis) modelContext(call ssa.CallInstruction, ix *index) {
+	if direct, ok := call.(*ssa.Call); ok {
+		a.modelAfterFunc(direct, ix)
+		a.modelDone(direct, ix)
+	}
 	common := call.Common()
 	targets := a.targets(common)
 	names := []string{}
@@ -50,11 +53,8 @@ func (a *flowAnalysis) modelContext(call *ssa.Call, ix *index) {
 			return
 		}
 	}
-	if a.special == nil {
-		a.special = map[*ssa.Call][]flowValue{}
-	}
 	if a.contexts == nil {
-		a.contexts = map[*ssa.Call]contextSite{}
+		a.contexts = map[ssa.CallInstruction]contextSite{}
 	}
 	if a.contextKeys == nil {
 		a.contextKeys = map[string]contextSite{}
@@ -78,14 +78,22 @@ func (a *flowAnalysis) modelContext(call *ssa.Call, ix *index) {
 		cancel.effects["cancel:"+key] = true
 		results = append(results, cancel)
 	}
-	a.special[call] = results
-	a.contexts[call] = contextSite{key: key, owner: ix.owner(call.Parent()), name: name, names: names, position: call.Pos(), needsCancel: needsCancel}
-	site := a.contexts[call]
+	certainty := "fact"
+	if _, ok := call.(*ssa.Call); !ok {
+		certainty = "possible"
+	}
+	site := contextSite{key: key, owner: ix.owner(call.Parent()), name: name, names: names, position: call.Pos(), certainty: certainty, needsCancel: needsCancel}
 	if name != "Background" && name != "TODO" && len(call.Common().Args) > 0 {
 		site.parent = call.Common().Args[0]
 	}
 	a.contexts[call] = site
 	a.contextKeys[key] = site
+	if direct, ok := call.(*ssa.Call); ok {
+		if a.special == nil {
+			a.special = map[*ssa.Call][]flowValue{}
+		}
+		a.special[direct] = results
+	}
 	if ix.funcs[key] == nil {
 		ix.funcs[key] = &function{node: Node{ID: key, Name: "context at " + evidence.File + fmt.Sprintf(":%d:%d", evidence.Line, evidence.Column), Kind: "context", Evidence: evidence}}
 	}
@@ -183,20 +191,20 @@ func (a *flowAnalysis) contextBoundaries(ix *index) {
 			canceled[edge.To] = true
 		}
 	}
-	for call, site := range a.contexts {
+	for _, site := range a.contexts {
 		if site.needsCancel && site.parent != nil {
 			a.cancellationSchedulerRelationships(site.key, a.get(site.parent), ix.evidence(site.position), "context_cancellation_scheduler", "context_scheduler_stop_target", ix)
 		}
-		ix.edge(site.owner, site.key, "context_create", "fact", site.position)
+		ix.edge(site.owner, site.key, "context_create", site.certainty, site.position)
 		if site.name == "WithoutCancel" {
-			ix.edge(site.owner, site.key, "context_detach", "fact", site.position)
+			ix.edge(site.owner, site.key, "context_detach", site.certainty, site.position)
 		}
 		if site.needsCancel && !canceled[site.key] {
 			ix.boundaries = append(ix.boundaries, Boundary{Node: site.owner, Kind: "unobserved_cancel", Reason: "no modeled call to the cancel function for " + site.key + "; it may escape to external code or rely on deadline expiry, so this is an investigation candidate", Evidence: ix.evidence(site.position)})
 		}
-		if site.name != "Background" && site.name != "TODO" && len(call.Common().Args) > 0 {
+		if site.parent != nil {
 			parentKnown := false
-			for parent := range a.get(call.Common().Args[0]).addresses {
+			for parent := range a.get(site.parent).addresses {
 				if _, modeled := a.contextKeys[parent]; modeled {
 					ix.edge(site.key, parent, "context_parent", "possible", site.position)
 					if site.name != "WithoutCancel" {

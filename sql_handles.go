@@ -1,6 +1,7 @@
 package contracttrace
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -13,6 +14,9 @@ import (
 type sqlHandle struct {
 	owner, symbol   string
 	position        token.Pos
+	certainty       string
+	discarded       bool
+	discardEvidence Evidence
 	typ             types.Type
 	parent          flowValue
 	hasParent       bool
@@ -150,8 +154,9 @@ func sqlReceiver(t types.Type) string {
 	return named.Obj().Name()
 }
 
-func (a *flowAnalysis) modelSQLHandle(call *ssa.Call, ix *index) {
-	invocations, _ := a.sqlInvocations(call.Common())
+func (a *flowAnalysis) modelSQLHandle(call ssa.CallInstruction, ix *index) {
+	common := call.Common()
+	invocations, _ := a.sqlInvocations(common)
 	for _, invocation := range invocations {
 		kind := ""
 		queryArgument := -1
@@ -179,25 +184,32 @@ func (a *flowAnalysis) modelSQLHandle(call *ssa.Call, ix *index) {
 		if kind == "" {
 			continue
 		}
-		id := ix.allocationID(kind, call.Parent(), call)
+		id := ix.sqlHandleAllocationID(kind, call)
 		value := emptyFlow()
 		value.addresses[id] = true
-		if a.special == nil {
-			a.special = map[*ssa.Call][]flowValue{}
+		direct, hasResult := call.(*ssa.Call)
+		if hasResult {
+			if a.special == nil {
+				a.special = map[*ssa.Call][]flowValue{}
+			}
+			resultCount := 1
+			if tuple, ok := direct.Type().(*types.Tuple); ok {
+				resultCount = tuple.Len()
+			}
+			if resultCount < 1 {
+				resultCount = 1
+			}
+			results := a.special[direct]
+			for len(results) < resultCount {
+				results = append(results, emptyFlow())
+			}
+			a.merge(&results[0], value)
+			a.special[direct] = results
 		}
-		resultCount := 1
-		if tuple, ok := call.Type().(*types.Tuple); ok {
-			resultCount = tuple.Len()
+		certainty := "fact"
+		if !hasResult {
+			certainty = "possible"
 		}
-		if resultCount < 1 {
-			resultCount = 1
-		}
-		results := a.special[call]
-		for len(results) < resultCount {
-			results = append(results, emptyFlow())
-		}
-		a.merge(&results[0], value)
-		a.special[call] = results
 		if ix.funcs[id] == nil {
 			ix.funcs[id] = &function{node: Node{ID: id, Name: kind + " creation", Kind: kind, Evidence: ix.callEvidence(call)}}
 		}
@@ -210,7 +222,11 @@ func (a *flowAnalysis) modelSQLHandle(call *ssa.Call, ix *index) {
 			if signature, ok := invocation.method.Type().(*types.Signature); ok && signature.Results().Len() > 0 {
 				handleType = signature.Results().At(0).Type()
 			}
-			site = sqlHandle{owner: ix.owner(call.Parent()), position: call.Common().Pos(), typ: handleType, parent: emptyFlow(), queries: map[sqlQueryBinding]bool{}, originals: map[ssa.Value]bool{}, symbols: map[string]bool{}}
+			site = sqlHandle{owner: ix.owner(call.Parent()), position: common.Pos(), certainty: certainty, typ: handleType, parent: emptyFlow(), queries: map[sqlQueryBinding]bool{}, originals: map[ssa.Value]bool{}, symbols: map[string]bool{}}
+		}
+		if !hasResult {
+			site.discarded = true
+			site.discardEvidence = ix.callEvidence(call)
 		}
 		site.symbol = sqlInvocationSymbol(invocation)
 		site.symbols[site.symbol] = true
@@ -235,6 +251,14 @@ func (a *flowAnalysis) modelSQLHandle(call *ssa.Call, ix *index) {
 		}
 		a.sqlHandles[id] = site
 	}
+}
+
+func (ix *index) sqlHandleAllocationID(kind string, call ssa.CallInstruction) string {
+	if value, ok := call.(ssa.Value); ok {
+		return ix.allocationID(kind, call.Parent(), value)
+	}
+	evidence := ix.callEvidence(call)
+	return fmt.Sprintf("%s:%s:%s:%d:%d:call", kind, call.Parent().String(), evidence.File, evidence.Line, evidence.Column)
 }
 
 func (a *flowAnalysis) sqlHandleUse(call ssa.CallInstruction, ix *index) {
