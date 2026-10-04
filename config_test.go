@@ -87,7 +87,16 @@ func TestConfigurationNameWhitespaceRejectedByBothEntrypoints(t *testing.T) {
 		{"lifecycle_names", "shutdown", func(c *Config, value string) { c.LifecycleNames = []string{value} }},
 	}
 	for _, list := range lists {
-		for _, value := range []string{"", " " + list.canonical, list.canonical + " "} {
+		values := []string{"", " " + list.canonical, list.canonical + " "}
+		switch list.field {
+		case "sql_methods":
+			values = append(values, "Que ry", "Que\u2009ry")
+		case "event_fields":
+			values = append(values, "Event Type", "Event\u00a0Type")
+		case "lifecycle_names":
+			values = append(values, "shut down", "shut\u2009down")
+		}
+		for _, value := range values {
 			t.Run(list.field+fmt.Sprintf("/%q", value), func(t *testing.T) {
 				text := fmt.Sprintf(`{"%s":[%q]}`, list.field, value)
 				if _, err := ReadConfig(strings.NewReader(text)); err == nil {

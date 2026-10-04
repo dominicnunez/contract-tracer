@@ -83,6 +83,9 @@ func validateConfig(c Config) error {
 			if strings.TrimSpace(name) != name {
 				return fmt.Errorf("configuration names must not have surrounding whitespace")
 			}
+			if strings.IndexFunc(name, unicode.IsSpace) >= 0 {
+				return fmt.Errorf("configuration names must not contain whitespace")
+			}
 		}
 	}
 	for _, r := range c.CallRules {
