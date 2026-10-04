@@ -346,6 +346,86 @@ func init() { api.Publish("runtime.init") }
 	}
 }
 
+func TestCompoundEventFieldAssignmentRemainsUnresolved(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/compoundevent\n\ngo 1.27.0\n",
+		"api/api.go": `package api
+
+func Publish(string) bool { return true }
+func Query(string) bool { return true }
+`,
+		"app.go": `package app
+
+import "example.com/compoundevent/api"
+
+type Envelope struct { EventType string }
+
+func Send(e *Envelope) {
+	e.EventType = "orders.changed"
+	e.EventType += ".updated"
+}
+
+func Define() {
+	EventType := "orders.local"
+	EventType = "orders.replaced"
+	_ = EventType
+}
+
+func PublishPartial(EventType string) {
+	EventType += ".published"
+	api.Publish(EventType)
+}
+
+func QueryPartial(query string) {
+	query += "SELECT id FROM records"
+	api.Query(query)
+}
+`,
+	}
+	for name, source := range files {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(source), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r, err := Trace(context.Background(), Options{
+		Root: root, Seeds: []string{"Send", "Define", "PublishPartial", "QueryPartial"}, Depth: 2, MaxNodes: 50,
+		Config: Config{CallRules: []CallRule{
+			{Symbol: "example.com/compoundevent/api::Publish", Kind: "event_publish", Argument: 0},
+			{Symbol: "example.com/compoundevent/api::Query", Kind: "sql_query", Argument: 0, Namespace: "primary"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasRelationship(r, "example.com/compoundevent::Send", "event:orders.changed", "event_assign", "app.go", 8) {
+		t.Error("plain assignment to a configured event field lost its complete event candidate")
+	}
+	if hasRelationship(r, "example.com/compoundevent::Send", "event:.updated", "event_assign", "app.go", 9) {
+		t.Error("compound assignment incorrectly treated only its suffix as the complete event")
+	}
+	if !hasBoundaryAt(r, "example.com/compoundevent::Send", "dynamic_event", "app.go", 9) {
+		t.Error("compound event assignment needs an unresolved-value boundary")
+	}
+	if !hasRelationship(r, "example.com/compoundevent::Define", "event:orders.local", "event_assign", "app.go", 13) ||
+		!hasRelationship(r, "example.com/compoundevent::Define", "event:orders.replaced", "event_assign", "app.go", 14) {
+		t.Error("plain short and reassignment event values should remain recognized")
+	}
+	if !hasBoundaryAt(r, "example.com/compoundevent::PublishPartial", "dynamic_event", "app.go", 19) {
+		t.Error("compound assignment to an event-valued parameter needs an unresolved event boundary")
+	}
+	if !hasBoundaryAt(r, "example.com/compoundevent::PublishPartial", "dynamic_api_value", "app.go", 20) {
+		t.Error("configured API argument needs an unresolved-value boundary after a compound write")
+	}
+	if !hasBoundaryAt(r, "example.com/compoundevent::QueryPartial", "dynamic_api_value", "app.go", 25) {
+		t.Error("configured SQL API argument needs an unresolved-value boundary after a compound write")
+	}
+}
+
 func hasRelationship(r Report, from, to, kind, file string, line int) bool {
 	for _, edge := range r.Relationships {
 		if edge.From == from && edge.To == to && edge.Kind == kind && edge.Evidence.File == file &&

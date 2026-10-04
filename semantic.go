@@ -135,9 +135,19 @@ func localAssignments(f *function, roots []ast.Node) assignments {
 		inspectSemanticRoot(root, f, func(n ast.Node) bool {
 			switch v := n.(type) {
 			case *ast.AssignStmt:
-				for i, lhs := range v.Lhs {
-					if i < len(v.Rhs) {
-						set(lhs, v.Rhs[i])
+				if v.Tok == token.ASSIGN || v.Tok == token.DEFINE {
+					for i, lhs := range v.Lhs {
+						if i < len(v.Rhs) {
+							set(lhs, v.Rhs[i])
+						}
+					}
+				} else {
+					for _, lhs := range v.Lhs {
+						if id, ok := lhs.(*ast.Ident); ok {
+							if obj := f.pkg.TypesInfo.ObjectOf(id); obj != nil {
+								a.counts[obj]++
+							}
+						}
 					}
 				}
 			case *ast.ValueSpec:
@@ -321,8 +331,19 @@ func (ix *index) semantic(c Config) error {
 					}
 				case *ast.AssignStmt:
 					for i, lhs := range v.Lhs {
-						if contains(c.EventFields, field(lhs)) && i < len(v.Rhs) {
-							event(v.Rhs[i], "event_assign")
+						if !contains(c.EventFields, field(lhs)) {
+							continue
+						}
+						if v.Tok == token.ASSIGN || v.Tok == token.DEFINE {
+							if i < len(v.Rhs) {
+								event(v.Rhs[i], "event_assign")
+							}
+						} else {
+							ix.boundaries = append(ix.boundaries, Boundary{
+								Node: id, Kind: "dynamic_event",
+								Reason:   "compound assignment combines an event value with another expression; the resulting value is unresolved",
+								Evidence: ix.evidence(v.Pos()),
+							})
 						}
 					}
 				case *ast.BinaryExpr:
