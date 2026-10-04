@@ -76,11 +76,15 @@ The analyzer uses typed Go syntax/SSA and bounded value-flow models. Interface a
 
 ## Contributing
 
-Install Go and Python 3.12 or newer, then install the pinned development hook runner and enable both commit and push checks:
+Install Go and Python 3.12 or newer, then install the pinned development hook runner and enable the commit and push checks:
 
 ```sh
 python -m pip install -r requirements-dev.txt
-pre-commit install
+python tools/install_hooks.py
 ```
 
-Commit checks validate YAML/JSON, whitespace, merge markers and private-key markers, lint GitHub Actions workflows, and verify that staged production Go files already pass `gofmt`. Push checks require the pushed revision to match `HEAD` when a push ref is available, require a clean nonignored worktree, validate the hook configuration, and run `go vet ./...`, `go test ./... -count=1`, and `go build ./cmd/contract-trace`. CI runs the Go checks on Linux and Windows with Go 1.27, and runs the repository-wide pre-commit checks and hook-helper tests.
+The installer keeps an existing pre-commit-managed commit hook, installs the standard commit checks, and installs a raw Git pre-push hook. It refuses to replace unrecognized hooks; move or explicitly chain a custom hook before installing these checks. Run the installer again after changing the Python interpreter used by the repository.
+
+Commit checks validate YAML/JSON, whitespace, merge markers and private-key markers, lint GitHub Actions workflows, and verify that staged production Go files already pass `gofmt`. Before running push checks, the raw hook examines every Git ref update. Every non-deletion update must resolve to the checked-out `HEAD` commit, and the worktree must be clean. This permits annotated or lightweight tags that resolve to `HEAD`; tags pointing elsewhere and refs that do not resolve to a commit are rejected. Deletion-only pushes skip validation. Once all updates pass these checks, the hook runs `go vet ./...`, `go test ./... -count=1`, and `go build ./cmd/contract-trace` once. CI runs the Go checks on Linux and Windows with Go 1.27, and runs the repository-wide pre-commit checks and hook-helper tests.
+
+Use [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/) for commit messages and squash titles, such as `fix(storage): preserve rollback edges`. Mark a breaking change with `!` after the type or scope (for example, `feat(api)!: change the config format`) or a `BREAKING CHANGE:` footer.
