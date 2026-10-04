@@ -1,0 +1,74 @@
+fail_fast: true
+minimum_pre_commit_version: '4.6.2'
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c
+    hooks:
+      - id: check-yaml
+        stages: [pre-commit]
+      - id: check-json
+        stages: [pre-commit]
+      - id: trailing-whitespace
+        stages: [pre-commit]
+      - id: end-of-file-fixer
+        stages: [pre-commit]
+      - id: check-merge-conflict
+        stages: [pre-commit]
+      - id: detect-private-key
+        stages: [pre-commit]
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: 914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
+    hooks:
+      - id: actionlint
+        language_version: system
+        stages: [pre-commit]
+
+  - repo: local
+    hooks:
+      - id: gofmt-check
+        name: Check Go formatting
+        entry: python tools/check_gofmt.py
+        language: system
+        types: [go]
+        exclude: ^testdata/
+        pass_filenames: true
+        stages: [pre-commit]
+      - id: check-push-state
+        name: Verify pushed revision and clean worktree
+        entry: python tools/check_push_state.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+      - id: validate-hook-config
+        name: Validate hook configuration
+        entry: pre-commit validate-config
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+      - id: go-vet
+        name: Go vet
+        entry: go vet ./...
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+      - id: go-test
+        name: Go tests
+        entry: go test ./... -count=1
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+      - id: go-build
+        name: Build CLI
+        entry: go build ./cmd/contract-trace
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
