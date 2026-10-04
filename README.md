@@ -45,7 +45,7 @@ Important options include `-tests`, `-tags`, `-expand-callbacks`, `-timeout`, `-
 
 ## Configuration
 
-`-config config.json` accepts one strict JSON object. Unknown fields, invalid selectors and unsupported rule kinds are errors. Omitted fields keep defaults; explicitly setting an array to `[]` disables that default list. Symbols use `<Go import path>::<declared function or method>`.
+`-config config.json` accepts one strict JSON object. Unknown fields, invalid selectors and unsupported rule kinds are errors. Omitted fields keep defaults; explicitly setting an array to `[]` disables that default list. Call and lifecycle symbols use `<Go import path>::<declared function or method>`. A storage scope's `database_origins` may also use `<Go import path>::(package init)` for a database constructor declared in a package-level variable initializer.
 
 Configured call rules describe typed SQL or event API signatures. Argument indexes exclude a method receiver; `handler_argument` is valid for `event_subscribe`.
 

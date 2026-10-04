@@ -53,7 +53,69 @@ type assignments struct {
 	counts map[types.Object]int
 }
 
-func localAssignments(f *function) assignments {
+func semanticRoots(ix *index, f *function) []ast.Node {
+	if f.decl != nil && f.decl.Body != nil {
+		return []ast.Node{f.decl.Body}
+	}
+	if f.node.Kind != "initializer" || f.pkg == nil {
+		return nil
+	}
+	roots := []ast.Node{}
+	for _, file := range f.pkg.Syntax {
+		if _, inside := relative(ix.root, ix.fset.Position(file.Pos()).Filename); !inside {
+			continue
+		}
+		for _, declaration := range file.Decls {
+			group, ok := declaration.(*ast.GenDecl)
+			if !ok || group.Tok != token.VAR {
+				continue
+			}
+			for _, specification := range group.Specs {
+				value, ok := specification.(*ast.ValueSpec)
+				if ok && len(value.Values) > 0 {
+					roots = append(roots, value)
+				}
+			}
+		}
+	}
+	return roots
+}
+
+func initializerFuncLiteral(expression ast.Expr) *ast.FuncLit {
+	switch value := expression.(type) {
+	case *ast.FuncLit:
+		return value
+	case *ast.ParenExpr:
+		return initializerFuncLiteral(value.X)
+	default:
+		return nil
+	}
+}
+
+func inspectSemanticRoot(root ast.Node, f *function, visit func(ast.Node) bool) {
+	if f.node.Kind != "initializer" {
+		ast.Inspect(root, visit)
+		return
+	}
+	executed := map[*ast.FuncLit]bool{}
+	ast.Inspect(root, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if ok {
+			if literal := initializerFuncLiteral(call.Fun); literal != nil {
+				executed[literal] = true
+			}
+		}
+		return true
+	})
+	ast.Inspect(root, func(node ast.Node) bool {
+		if literal, ok := node.(*ast.FuncLit); ok && !executed[literal] {
+			return false
+		}
+		return visit(node)
+	})
+}
+
+func localAssignments(f *function, roots []ast.Node) assignments {
 	a := assignments{values: map[types.Object]ast.Expr{}, counts: map[types.Object]int{}}
 	set := func(lhs ast.Expr, rhs ast.Expr) {
 		id, ok := lhs.(*ast.Ident)
@@ -62,37 +124,42 @@ func localAssignments(f *function) assignments {
 		}
 		obj := f.pkg.TypesInfo.ObjectOf(id)
 		if obj != nil {
+			if f.node.Kind == "initializer" && obj.Parent() == f.pkg.Types.Scope() {
+				return
+			}
 			a.counts[obj]++
 			a.values[obj] = rhs
 		}
 	}
-	ast.Inspect(f.decl.Body, func(n ast.Node) bool {
-		switch v := n.(type) {
-		case *ast.AssignStmt:
-			for i, lhs := range v.Lhs {
-				if i < len(v.Rhs) {
-					set(lhs, v.Rhs[i])
+	for _, root := range roots {
+		inspectSemanticRoot(root, f, func(n ast.Node) bool {
+			switch v := n.(type) {
+			case *ast.AssignStmt:
+				for i, lhs := range v.Lhs {
+					if i < len(v.Rhs) {
+						set(lhs, v.Rhs[i])
+					}
 				}
-			}
-		case *ast.ValueSpec:
-			for i, id := range v.Names {
-				if i < len(v.Values) {
-					set(id, v.Values[i])
+			case *ast.ValueSpec:
+				for i, id := range v.Names {
+					if i < len(v.Values) {
+						set(id, v.Values[i])
+					}
 				}
-			}
-		case *ast.IncDecStmt:
-			if id, ok := v.X.(*ast.Ident); ok {
-				a.counts[f.pkg.TypesInfo.ObjectOf(id)]++
-			}
-		case *ast.RangeStmt:
-			for _, lhs := range []ast.Expr{v.Key, v.Value} {
-				if id, ok := lhs.(*ast.Ident); ok {
+			case *ast.IncDecStmt:
+				if id, ok := v.X.(*ast.Ident); ok {
 					a.counts[f.pkg.TypesInfo.ObjectOf(id)]++
 				}
+			case *ast.RangeStmt:
+				for _, lhs := range []ast.Expr{v.Key, v.Value} {
+					if id, ok := lhs.(*ast.Ident); ok {
+						a.counts[f.pkg.TypesInfo.ObjectOf(id)]++
+					}
+				}
 			}
-		}
-		return true
-	})
+			return true
+		})
+	}
 	return a
 }
 
@@ -159,15 +226,18 @@ func (ix *index) semantic(c Config) error {
 	ix.storage.Dialect = c.SQLDialect
 	matchedRules := map[string]bool{}
 	ids := []string{}
+	rootsByID := map[string][]ast.Node{}
 	for id, f := range ix.funcs {
-		if f.decl != nil {
+		if roots := semanticRoots(ix, f); len(roots) > 0 {
 			ids = append(ids, id)
+			rootsByID[id] = roots
 		}
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
 		f := ix.funcs[id]
-		a := localAssignments(f)
+		roots := rootsByID[id]
+		a := localAssignments(f, roots)
 		for _, hint := range c.LifecycleNames {
 			if strings.Contains(strings.ToLower(f.node.Name), strings.ToLower(hint)) {
 				ix.boundaries = append(ix.boundaries, Boundary{Node: id, Kind: "lifecycle_hint", Reason: "configured name hint " + hint + "; inspect lifecycle ownership, not an established invariant", Evidence: f.node.Evidence})
@@ -186,100 +256,102 @@ func (ix *index) semantic(c Config) error {
 			}
 		}
 		var semanticErr error
-		ast.Inspect(f.decl.Body, func(n ast.Node) bool {
-			if semanticErr != nil {
-				return false
-			}
-			switch v := n.(type) {
-			case *ast.CallExpr:
-				handled, err := ix.applyCallRules(id, f, v, a, c, matchedRules)
-				if err != nil {
-					semanticErr = err
+		for _, root := range roots {
+			inspectSemanticRoot(root, f, func(n ast.Node) bool {
+				if semanticErr != nil {
 					return false
 				}
-				if handled {
-					break
-				}
-				prepared, err := ix.preparedSQL(id, f, v, c)
-				if err != nil {
-					semanticErr = err
-					return false
-				}
-				if prepared {
-					break
-				}
-				sel, ok := v.Fun.(*ast.SelectorExpr)
-				if !ok || !contains(c.SQLMethods, sel.Sel.Name) {
-					break
-				}
-				arg := 0
-				if strings.HasSuffix(sel.Sel.Name, "Context") {
-					arg = 1
-				}
-				if arg >= len(v.Args) {
-					break
-				}
-				namespaces, err := ix.callNamespaces(id, v, "", c)
-				if err != nil {
-					semanticErr = err
-					return false
-				}
-				texts, complete := ix.stringCandidates(v.Args[arg], f, a)
-				if !complete {
-					ix.boundaries = append(ix.boundaries, Boundary{Node: id, Kind: "dynamic_sql", Reason: "query contains unresolved or multiply assigned values; only resolvable table fragments are inventoried", Evidence: ix.evidence(v.Args[arg].Pos())})
-				}
-				tables := []sqlAccess{}
-				for _, text := range texts {
-					for _, found := range ix.sqlAccesses(id, text, ix.evidence(v.Pos())) {
-						tables = append(tables, found.access)
+				switch v := n.(type) {
+				case *ast.CallExpr:
+					handled, err := ix.applyCallRules(id, f, v, a, c, matchedRules)
+					if err != nil {
+						semanticErr = err
+						return false
 					}
-				}
-				if complete && len(tables) == 0 && !ix.parsedSQL(texts) {
-					ix.boundaries = append(ix.boundaries, Boundary{Node: id, Kind: "unparsed_sql", Reason: "configured SQL method has no recognized table access; statement or wrapper may be unsupported", Evidence: ix.evidence(v.Pos())})
-				}
-				for _, access := range tables {
-					if !strings.Contains(access.table, unknown) {
-						for _, namespace := range namespaces {
-							ix.sqlTableAccess(id, resourceID("table", namespace, access.table), access.table, access.role, v)
+					if handled {
+						break
+					}
+					prepared, err := ix.preparedSQL(id, f, v, c)
+					if err != nil {
+						semanticErr = err
+						return false
+					}
+					if prepared {
+						break
+					}
+					sel, ok := v.Fun.(*ast.SelectorExpr)
+					if !ok || !contains(c.SQLMethods, sel.Sel.Name) {
+						break
+					}
+					arg := 0
+					if strings.HasSuffix(sel.Sel.Name, "Context") {
+						arg = 1
+					}
+					if arg >= len(v.Args) {
+						break
+					}
+					namespaces, err := ix.callNamespaces(id, v, "", c)
+					if err != nil {
+						semanticErr = err
+						return false
+					}
+					texts, complete := ix.stringCandidates(v.Args[arg], f, a)
+					if !complete {
+						ix.boundaries = append(ix.boundaries, Boundary{Node: id, Kind: "dynamic_sql", Reason: "query contains unresolved or multiply assigned values; only resolvable table fragments are inventoried", Evidence: ix.evidence(v.Args[arg].Pos())})
+					}
+					tables := []sqlAccess{}
+					for _, text := range texts {
+						for _, found := range ix.sqlAccesses(id, text, ix.evidence(v.Pos())) {
+							tables = append(tables, found.access)
 						}
 					}
-				}
-			case *ast.KeyValueExpr:
-				if contains(c.EventFields, field(v.Key)) {
-					event(v.Value, "event_construct")
-				}
-			case *ast.AssignStmt:
-				for i, lhs := range v.Lhs {
-					if contains(c.EventFields, field(lhs)) && i < len(v.Rhs) {
-						event(v.Rhs[i], "event_assign")
+					if complete && len(tables) == 0 && !ix.parsedSQL(texts) {
+						ix.boundaries = append(ix.boundaries, Boundary{Node: id, Kind: "unparsed_sql", Reason: "configured SQL method has no recognized table access; statement or wrapper may be unsupported", Evidence: ix.evidence(v.Pos())})
 					}
-				}
-			case *ast.BinaryExpr:
-				if v.Op == token.EQL || v.Op == token.NEQ {
-					if contains(c.EventFields, field(v.X)) {
-						event(v.Y, "event_compare")
-					}
-					if contains(c.EventFields, field(v.Y)) {
-						event(v.X, "event_compare")
-					}
-				}
-			case *ast.SwitchStmt:
-				if contains(c.EventFields, field(v.Tag)) {
-					for _, item := range v.Body.List {
-						if clause, ok := item.(*ast.CaseClause); ok {
-							for _, expr := range clause.List {
-								event(expr, "event_case")
+					for _, access := range tables {
+						if !strings.Contains(access.table, unknown) {
+							for _, namespace := range namespaces {
+								ix.sqlTableAccess(id, resourceID("table", namespace, access.table), access.table, access.role, v)
 							}
 						}
 					}
+				case *ast.KeyValueExpr:
+					if contains(c.EventFields, field(v.Key)) {
+						event(v.Value, "event_construct")
+					}
+				case *ast.AssignStmt:
+					for i, lhs := range v.Lhs {
+						if contains(c.EventFields, field(lhs)) && i < len(v.Rhs) {
+							event(v.Rhs[i], "event_assign")
+						}
+					}
+				case *ast.BinaryExpr:
+					if v.Op == token.EQL || v.Op == token.NEQ {
+						if contains(c.EventFields, field(v.X)) {
+							event(v.Y, "event_compare")
+						}
+						if contains(c.EventFields, field(v.Y)) {
+							event(v.X, "event_compare")
+						}
+					}
+				case *ast.SwitchStmt:
+					if contains(c.EventFields, field(v.Tag)) {
+						for _, item := range v.Body.List {
+							if clause, ok := item.(*ast.CaseClause); ok {
+								for _, expr := range clause.List {
+									event(expr, "event_case")
+								}
+							}
+						}
+					}
+				case *ast.GoStmt:
+					ix.boundaries = append(ix.boundaries, Boundary{Node: id, Kind: "concurrency", Reason: "goroutine ownership and termination need investigation", Evidence: ix.evidence(v.Pos())})
+				case *ast.DeferStmt:
+					ix.boundaries = append(ix.boundaries, Boundary{Node: id, Kind: "cleanup", Reason: "deferred action is a cleanup candidate; adequacy and ordering are not established", Evidence: ix.evidence(v.Pos())})
 				}
-			case *ast.GoStmt:
-				ix.boundaries = append(ix.boundaries, Boundary{Node: id, Kind: "concurrency", Reason: "goroutine ownership and termination need investigation", Evidence: ix.evidence(v.Pos())})
-			case *ast.DeferStmt:
-				ix.boundaries = append(ix.boundaries, Boundary{Node: id, Kind: "cleanup", Reason: "deferred action is a cleanup candidate; adequacy and ordering are not established", Evidence: ix.evidence(v.Pos())})
-			}
-			return true
-		})
+				return true
+			})
+		}
 		if semanticErr != nil {
 			return semanticErr
 		}

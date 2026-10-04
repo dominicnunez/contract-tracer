@@ -183,6 +183,188 @@ func TestEventProducerConsumer(t *testing.T) {
 	}
 }
 
+func TestPackageInitializersUseConfiguredSemanticAdapters(t *testing.T) {
+	configJSON := `{"storage_scopes":[{"namespace":"initializer-store","database_origins":["example.com/initfixture::(package init)"]}]}`
+	if _, err := ReadConfig(strings.NewReader(configJSON)); err != nil {
+		t.Fatalf("ReadConfig rejected the modeled package-initializer database owner: %v", err)
+	}
+	for _, invalid := range []string{
+		"example.com/initfixture::(package init)::Open",
+		"example.com/initfixture:: (package init)",
+	} {
+		if _, err := ReadConfig(strings.NewReader(`{"storage_scopes":[{"namespace":"initializer-store","database_origins":["` + invalid + `"]}]}`)); err == nil {
+			t.Errorf("ReadConfig accepted malformed package-initializer database owner %q", invalid)
+		}
+	}
+	root := t.TempDir()
+	write := func(name, source string) {
+		t.Helper()
+		file := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte(source), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module example.com/initfixture\n\ngo 1.27.0\n")
+	write("api/api.go", `package api
+
+func Publish(string) bool { return true }
+func Subscribe(string, func()) bool { return true }
+func Query(string) bool { return true }
+`)
+	write("events.go", `package app
+
+import "example.com/initfixture/api"
+
+type Envelope struct { EventType string }
+const orderCreated = "orders.created"
+var eventName = orderCreated
+var eventNameMutation = ChangeEventName()
+var publishResult = api.Publish(eventName)
+var eventEnvelope = Envelope{EventType: orderCreated}
+var immediateResult = func() bool { return api.Publish("iife.event") }()
+`)
+	write("mutator.go", `package app
+
+func ChangeEventName() bool {
+	eventName = "orders.changed"
+	return true
+}
+`)
+	write("consumers.go", `package app
+
+import (
+	"database/sql"
+	"example.com/initfixture/api"
+)
+
+func HandleOrder() {}
+var subscriptionResult = api.Subscribe(eventName, HandleOrder)
+var queryResult = api.Query("SELECT id FROM records")
+var openedDB, openErr = sql.Open("sqlite", ":memory:")
+var openedRows, rowsErr = openedDB.Query("SELECT id FROM opened_records")
+`)
+	write("dynamic.go", `package app
+
+import "example.com/initfixture/api"
+
+var dynamicEvent string
+var dynamicResult = api.Publish(dynamicEvent)
+`)
+	write("callbacks.go", `package app
+
+import "example.com/initfixture/api"
+
+var deferredPublisher = func() { api.Publish("closure.body") }
+`)
+	write("functions.go", `package app
+
+import "example.com/initfixture/api"
+
+func OrdinaryFunction() bool { return api.Publish("body.event") }
+func init() { api.Publish("runtime.init") }
+`)
+
+	r, err := Trace(context.Background(), Options{
+		Root: root, Seeds: []string{"example.com/initfixture::(package init)"}, Depth: 3, MaxNodes: 100,
+		Config: Config{CallRules: []CallRule{
+			{Symbol: "example.com/initfixture/api::Publish", Kind: "event_publish", Argument: 0},
+			{Symbol: "example.com/initfixture/api::Subscribe", Kind: "event_subscribe", Argument: 0, HandlerArgument: intPointer(1)},
+			{Symbol: "example.com/initfixture/api::Query", Kind: "sql_query", Argument: 0, Namespace: "primary"},
+		}, StorageScopes: []StorageScope{{
+			Namespace: "initializer-store", DatabaseOrigins: []string{"example.com/initfixture::(package init)"},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	initializer := "example.com/initfixture::(package init)"
+	requires := []struct {
+		to, kind string
+		line     int
+	}{
+		{"event:orders.changed", "event_publish", 9},
+		{"event:orders.created", "event_construct", 10},
+		{"event:iife.event", "event_publish", 11},
+		{"event:orders.changed", "event_subscribe", 9},
+		{"table:primary:records", "sql_read", 10},
+		{"table:initializer-store:opened_records", "sql_read", 12},
+	}
+	for _, expected := range requires {
+		found := false
+		for _, edge := range r.Relationships {
+			if edge.From == initializer && edge.To == expected.to && edge.Kind == expected.kind &&
+				edge.Evidence.File == map[string]string{
+					"event_publish": "events.go", "event_construct": "events.go",
+					"event_subscribe": "consumers.go", "sql_read": "consumers.go",
+				}[expected.kind] && edge.Evidence.Line == expected.line {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("package initializer is missing %s from %s at line %d", expected.kind, expected.to, expected.line)
+		}
+	}
+	if !hasRelationship(r, "example.com/initfixture::HandleOrder", "event:orders.changed", "event_handler", "consumers.go", 9) {
+		t.Error("subscription handler declaration must connect through initializer registration evidence")
+	}
+	if hasRelationship(r, initializer, "event:body.event", "event_publish", "functions.go", 0) ||
+		hasRelationship(r, initializer, "event:runtime.init", "event_publish", "functions.go", 0) ||
+		hasRelationship(r, initializer, "event:closure.body", "event_publish", "callbacks.go", 0) {
+		t.Error("ordinary function bodies were incorrectly attributed to package variable initialization")
+	}
+	if !hasRelationship(r, "example.com/initfixture::OrdinaryFunction", "event:body.event", "event_publish", "functions.go", 5) {
+		t.Error("ordinary function call lost its semantic owner")
+	}
+	initOwner := ""
+	for _, node := range r.Nodes {
+		if node.Kind == "function" && node.Name == "init" && strings.HasPrefix(node.ID, "example.com/initfixture::init@functions.go:") {
+			initOwner = node.ID
+		}
+	}
+	if initOwner == "" || !hasRelationship(r, initOwner, "event:runtime.init", "event_publish", "functions.go", 6) {
+		t.Error("explicit init function call lost its source owner")
+	}
+	if !hasBoundaryAt(r, initializer, "dynamic_api_value", "dynamic.go", 6) ||
+		!hasBoundaryAt(r, initializer, "dynamic_api_value", "events.go", 9) {
+		t.Error("dynamic package initializer API value needs its unresolved boundary")
+	}
+	for _, rule := range []string{
+		"example.com/initfixture/api::Publish", "example.com/initfixture/api::Subscribe", "example.com/initfixture/api::Query",
+	} {
+		for _, boundary := range r.Boundaries {
+			if boundary.Kind == "unmatched_rule" && strings.Contains(boundary.Reason, rule) {
+				t.Errorf("configured API used only by package initialization was reported unmatched: %s", rule)
+			}
+		}
+	}
+	if r.ContractComplete {
+		t.Error("package initializer resource evidence must not certify the contract")
+	}
+}
+
+func hasRelationship(r Report, from, to, kind, file string, line int) bool {
+	for _, edge := range r.Relationships {
+		if edge.From == from && edge.To == to && edge.Kind == kind && edge.Evidence.File == file &&
+			(line == 0 || edge.Evidence.Line == line) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasBoundaryAt(r Report, owner, kind, file string, line int) bool {
+	for _, boundary := range r.Boundaries {
+		if boundary.Node == owner && boundary.Kind == kind && boundary.Evidence.File == file && boundary.Evidence.Line == line {
+			return true
+		}
+	}
+	return false
+}
+
 func hasName(r Report, name string) bool {
 	for _, n := range r.Nodes {
 		if n.Name == name {

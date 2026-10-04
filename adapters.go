@@ -66,8 +66,8 @@ func validateConfig(c Config) error {
 			}
 		}
 		for _, origin := range scope.DatabaseOrigins {
-			if !validQualifiedSymbol(origin) {
-				return fmt.Errorf("database origin requires a fully qualified function symbol: %q", origin)
+			if !validDatabaseOriginSymbol(origin) {
+				return fmt.Errorf("database origin requires a fully qualified function or package initializer owner: %q", origin)
 			}
 			if previous := originNamespaces[origin]; previous != "" && previous != scope.Namespace {
 				return fmt.Errorf("ambiguous database origin %s: %s and %s", origin, previous, scope.Namespace)
@@ -113,6 +113,14 @@ func validQualifiedSymbol(symbol string) bool {
 	}
 	parts := strings.Split(symbol, "::")
 	return len(parts) == 2 && parts[0] != "" && parts[1] != ""
+}
+
+func validDatabaseOriginSymbol(symbol string) bool {
+	const packageInitializer = "(package init)"
+	if !strings.HasSuffix(symbol, "::"+packageInitializer) {
+		return validQualifiedSymbol(symbol)
+	}
+	return validQualifiedSymbol(strings.TrimSuffix(symbol, packageInitializer) + "init")
 }
 
 func callObject(expr ast.Expr, f *function) *types.Func {
