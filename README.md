@@ -4,7 +4,7 @@ Contract Tracer is a standalone Go library and command-line tool for discovering
 
 ## Requirements
 
-- Go 1.26.0 or newer, as selected by the module's `go` directive.
+- Go 1.27.0 or newer, as selected by the module's `go` directive.
 - Dependencies declared in `go.mod`; Go package loading may resolve target-module dependencies using the normal Go toolchain.
 
 The target is analyzed, not executed as an application.
@@ -73,4 +73,4 @@ python -m pip install -r requirements-dev.txt
 pre-commit install
 ```
 
-Commit checks validate YAML/JSON, whitespace, merge markers and private-key markers, lint GitHub Actions workflows, and verify that staged production Go files already pass `gofmt`. Push checks require the pushed revision to match `HEAD` when a push ref is available, require a clean nonignored worktree, validate the hook configuration, and run `go vet ./...`, `go test ./... -count=1`, and `go build ./cmd/contract-trace`. CI runs the Go checks on Linux and Windows with Go 1.26 and 1.27, and runs the repository-wide pre-commit checks and hook-helper tests.
+Commit checks validate YAML/JSON, whitespace, merge markers and private-key markers, lint GitHub Actions workflows, and verify that staged production Go files already pass `gofmt`. Push checks require the pushed revision to match `HEAD` when a push ref is available, require a clean nonignored worktree, validate the hook configuration, and run `go vet ./...`, `go test ./... -count=1`, and `go build ./cmd/contract-trace`. CI runs the Go checks on Linux and Windows with Go 1.27, and runs the repository-wide pre-commit checks and hook-helper tests.
