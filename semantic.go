@@ -39,6 +39,9 @@ func contains(list []string, value string) bool {
 	return false
 }
 func field(expr ast.Expr) string {
+	if paren, ok := expr.(*ast.ParenExpr); ok {
+		return field(paren.X)
+	}
 	switch e := expr.(type) {
 	case *ast.SelectorExpr:
 		return e.Sel.Name
