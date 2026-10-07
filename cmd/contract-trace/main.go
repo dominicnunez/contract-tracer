@@ -50,6 +50,14 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "format must be json or markdown")
 		return 1
 	}
+	snapshotPath, snapshotFlag := *saveAnalysis, "save-analysis"
+	if *resume != "" {
+		snapshotPath, snapshotFlag = *resume, "resume"
+	}
+	if err := rejectOutputSnapshotAlias(*output, snapshotPath, snapshotFlag); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	config := trace.DefaultConfig()
 	if *configPath != "" {
 		f, err := os.Open(*configPath)
