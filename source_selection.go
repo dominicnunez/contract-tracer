@@ -57,18 +57,21 @@ func loadedSourcePaths(sources []LoadedSource) []string {
 	return paths
 }
 
-func verifySelectedPackageSources(ctx context.Context, root string, build map[string]string, tests bool, tags string, loaded []LoadedSource) error {
+func verifySelectedPackageSources(ctx context.Context, root string, build map[string]string, tests bool, tags string, loaded []LoadedSource, embedded []string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	cfg := packageLoaderConfig(ctx, root, build, tests, tags)
-	cfg.Mode = packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedDeps | packages.NeedModule
+	cfg.Mode = packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedDeps | packages.NeedModule | packages.NeedEmbedFiles | packages.NeedEmbedPatterns
 	pkgs, err := packages.Load(cfg, "./...")
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		return fmt.Errorf("recheck selected Go source set: %w", err)
+	}
+	if !equalPathLists(selectedEmbeddedAssetPaths(root, pkgs), embedded) {
+		return fmt.Errorf("embedded asset set changed; rerun analysis")
 	}
 	selected, err := selectedPackageSourcePaths(pkgs)
 	if err != nil {
@@ -87,6 +90,18 @@ func verifySelectedPackageSources(ctx context.Context, root string, build map[st
 		}
 	}
 	return ctx.Err()
+}
+
+func equalPathLists(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func parserSourcePaths(sources []LoadedSource) []string {

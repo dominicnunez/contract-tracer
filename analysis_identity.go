@@ -12,7 +12,7 @@ func verifyAnalysisInputs(ctx context.Context, root string, build map[string]str
 	if err := verifyBuildEnvironment(ctx, root, build); err != nil {
 		return err
 	}
-	if err := verifySelectedPackageSources(ctx, root, build, tests, tags, loaded); err != nil {
+	if err := verifySelectedPackageSources(ctx, root, build, tests, tags, loaded, assets); err != nil {
 		return err
 	}
 

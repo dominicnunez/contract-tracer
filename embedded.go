@@ -63,19 +63,8 @@ func patternContains(pattern, file string) bool {
 }
 func (ix *index) loadEmbedded(pkgs []*packages.Package) error {
 	ix.embedded = map[*types.Var]string{}
-	files := map[string]bool{}
+	ix.assets = selectedEmbeddedAssetPaths(ix.root, pkgs)
 	bodies := map[string][]byte{}
-	for _, p := range pkgs {
-		for _, file := range p.EmbedFiles {
-			if rel, inside := relative(ix.root, file); inside {
-				files[rel] = true
-			}
-		}
-	}
-	for file := range files {
-		ix.assets = append(ix.assets, file)
-	}
-	sort.Strings(ix.assets)
 	h := sha256.New()
 	for _, file := range ix.assets {
 		body, err := os.ReadFile(filepath.Join(ix.root, filepath.FromSlash(file)))
@@ -88,11 +77,6 @@ func (ix *index) loadEmbedded(pkgs []*packages.Package) error {
 	}
 	ix.assetHash = hex.EncodeToString(h.Sum(nil))
 	for _, p := range pkgs {
-		for _, file := range p.EmbedFiles {
-			if rel, inside := relative(ix.root, file); inside {
-				files[rel] = true
-			}
-		}
 		for _, file := range p.Syntax {
 			directory := filepath.Dir(ix.fset.Position(file.Pos()).Filename)
 			for _, decl := range file.Decls {
@@ -163,6 +147,24 @@ func (ix *index) loadEmbedded(pkgs []*packages.Package) error {
 	}
 	return nil
 }
+
+func selectedEmbeddedAssetPaths(root string, pkgs []*packages.Package) []string {
+	files := map[string]bool{}
+	for _, p := range pkgs {
+		for _, file := range p.EmbedFiles {
+			if rel, inside := relative(root, file); inside {
+				files[rel] = true
+			}
+		}
+	}
+	assets := make([]string, 0, len(files))
+	for file := range files {
+		assets = append(assets, file)
+	}
+	sort.Strings(assets)
+	return assets
+}
+
 func hashFiles(root string, files []string) (string, error) {
 	h := sha256.New()
 	for _, file := range files {

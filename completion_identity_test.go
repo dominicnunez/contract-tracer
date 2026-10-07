@@ -28,13 +28,13 @@ func TestTraceRejectsInputsChangedByFinalGoEnv(t *testing.T) {
 			report, analysis, err := TraceWithAnalysis(context.Background(), fixture.options())
 			assertIdentityMutationRan(t, marker, countFile, 2)
 			if err == nil {
-				t.Fatalf("Trace returned a report after final go env changed %s", mutation.name)
+				t.Fatalf("Trace returned a report after final go env changed %s: report schema=%q nodes=%d analysis schema=%q", mutation.name, report.Schema, len(report.Nodes), analysis.Schema)
 			}
 			if !strings.Contains(err.Error(), mutation.wantError) {
 				t.Fatalf("Trace rejected changed %s for the wrong reason: %v", mutation.name, err)
 			}
 			if report.Schema != "" || len(report.Nodes) != 0 || analysis.Schema != "" {
-				t.Fatalf("Trace returned partial graph after input identity failure: report=%+v analysis=%+v", report, analysis)
+				t.Fatalf("Trace returned partial graph after input identity failure: report schema=%q nodes=%d analysis schema=%q", report.Schema, len(report.Nodes), analysis.Schema)
 			}
 		})
 	}
@@ -59,7 +59,7 @@ func TestExploreRejectsInputsChangedByFinalGoEnv(t *testing.T) {
 			}
 
 			call := 1
-			if mutation.name == "added dependency Go source" {
+			if mutation.name == "added dependency Go source" || mutation.name == "added embedded asset match" {
 				call = 2
 			}
 			marker, countFile := configureIdentityMutator(t, mutator, realGo, fixture.root, mutation, call)
@@ -85,6 +85,7 @@ func identityMutations() []identityMutation {
 		{name: "root go.mod", path: "go.mod", contents: "module example.com/app\n\ngo 1.27.0\n\nrequire example.com/dependency v0.0.0\nreplace example.com/dependency => ../dependency\n\n// changed after identity check\n", wantError: "resolution input check: loaded source changed"},
 		{name: "root go.sum", path: "go.sum", contents: "example.com/unused v1.0.0 h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n", wantError: "source changed during analysis"},
 		{name: "selected embedded asset", path: "asset.txt", contents: "changed asset", wantError: "embedded assets changed during analysis"},
+		{name: "added embedded asset match", path: filepath.Join("assets", "late.txt"), contents: "late", wantError: "embedded asset set changed"},
 		{name: "loaded dependency Go source", path: filepath.Join("..", "dependency", "dependency.go"), contents: "package dependency\nfunc Marker() int { return 2 }\n", wantError: "loaded source changed"},
 		{name: "added dependency Go source", path: filepath.Join("..", "dependency", "added.go"), contents: "package dependency\nfunc Added() int { return 2 }\n", wantError: "selected Go source set changed"},
 		{name: "dependency resolution manifest", path: filepath.Join("..", "dependency", "go.mod"), contents: "module example.com/dependency\n\ngo 1.27.0\n\n// changed after identity check\n", wantError: "resolution input check: loaded source changed"},
@@ -108,7 +109,7 @@ func newIdentityFixture(t *testing.T) identityFixture {
 	files := map[string]string{
 		filepath.Join(root, "go.mod"):              "module example.com/app\n\ngo 1.27.0\n\nrequire example.com/dependency v0.0.0\nreplace example.com/dependency => ../dependency\n",
 		filepath.Join(root, "go.sum"):              "",
-		filepath.Join(root, "app.go"):              "package app\n\nimport (\n\t_ \"embed\"\n\t\"example.com/dependency\"\n)\n\n//go:embed asset.txt\nvar asset []byte\n\nfunc Seed() { _ = dependency.Marker(); _ = asset }\n",
+		filepath.Join(root, "app.go"):              "package app\n\nimport (\n\t\"embed\"\n\t\"example.com/dependency\"\n)\n\n//go:embed asset.txt\nvar asset []byte\n\n//go:embed assets/*.txt\nvar allAssets embed.FS\n\nfunc Seed() { _ = dependency.Marker(); _ = asset; _ = allAssets }\n",
 		filepath.Join(root, "ignored.go"):          "//go:build identity_mutator_off\n\npackage app\n\nconst ignored = 1\n",
 		filepath.Join(root, "asset.txt"):           "embedded asset",
 		filepath.Join(root, "schema.sql"):          "CREATE TABLE records (id INTEGER PRIMARY KEY);\n",
@@ -119,6 +120,12 @@ func newIdentityFixture(t *testing.T) identityFixture {
 		if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := os.Mkdir(filepath.Join(root, "assets"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "assets", "initial.txt"), []byte("initial"), 0600); err != nil {
+		t.Fatal(err)
 	}
 	t.Setenv("GOWORK", "off")
 	return identityFixture{root: root}
