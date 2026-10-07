@@ -356,9 +356,6 @@ func (a *flowAnalysis) configuredLifecycleUse(call ssa.CallInstruction, from str
 			resolved := false
 			outside := value.interfaceUnknown || value.sqlUnknown || value.functionUnknown
 			for _, candidate := range sortedKeys(candidates) {
-				if strings.Contains(candidate, unknown) {
-					continue
-				}
 				resolved = true
 				outside = outside || strings.HasPrefix(candidate, "input:") || a.inputRoots[candidate]
 				key := resourceID("lifecycle", rule.Namespace, candidate)

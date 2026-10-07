@@ -216,11 +216,11 @@ func (ix *index) applyCallRules(id string, f *function, call *ast.CallExpr, a as
 			ix.boundaries = append(ix.boundaries, Boundary{Node: id, Kind: "dynamic_api_value", Reason: "configured API value uses flow candidates; additional runtime values may exist", Evidence: ix.evidence(call.Args[argumentIndex].Pos())})
 		}
 		for _, value := range values {
-			if strings.Contains(value, unknown) {
-				continue
-			}
 			if r.Kind == "sql_query" {
-				for _, found := range ix.sqlAccesses(id, value, ix.evidence(call.Pos())) {
+				for _, found := range ix.sqlAccesses(id, value.text, ix.evidence(call.Pos())) {
+					if tableHasHole(found.access.table, value) {
+						continue
+					}
 					access := found.access
 					for _, namespace := range namespaces {
 						ix.sqlTableAccess(id, resourceID("table", namespace, access.table), access.table, access.role, call)
@@ -228,8 +228,11 @@ func (ix *index) applyCallRules(id string, f *function, call *ast.CallExpr, a as
 				}
 				continue
 			}
-			key := resourceID("event", r.Namespace, value)
-			ix.resource(id, key, value, "event", r.Kind, call.Pos())
+			if len(value.holes) > 0 {
+				continue
+			}
+			key := resourceID("event", r.Namespace, value.text)
+			ix.resource(id, key, value.text, "event", r.Kind, call.Pos())
 			if r.HandlerArgument != nil {
 				if !validHandler {
 					continue

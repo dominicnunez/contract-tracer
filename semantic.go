@@ -185,34 +185,88 @@ func localAssignments(f *function, roots []ast.Node) assignments {
 	return a
 }
 
-const unknown = "__contract_unknown__"
+type stringPart struct {
+	text string
+	hole bool
+}
 
-func stringValue(expr ast.Expr, f *function, a assignments, seen map[types.Object]bool) (string, bool) {
+type stringExpression struct {
+	parts    []stringPart
+	complete bool
+}
+
+type stringCandidate struct {
+	text  string
+	holes []string
+}
+
+func knownString(text string) stringExpression {
+	return stringExpression{parts: []stringPart{{text: text}}, complete: true}
+}
+
+func unknownString() stringExpression {
+	return stringExpression{parts: []stringPart{{hole: true}}}
+}
+
+func (value stringExpression) candidate() stringCandidate {
+	knownText := strings.Builder{}
+	for _, part := range value.parts {
+		if !part.hole {
+			knownText.WriteString(part.text)
+		}
+	}
+	known := knownText.String()
+	lowerKnown := strings.ToLower(known)
+	used := map[string]bool{}
+	text := strings.Builder{}
+	holes := []string{}
+	for _, part := range value.parts {
+		if !part.hole {
+			text.WriteString(part.text)
+			continue
+		}
+		for index := 0; ; index++ {
+			token := fmt.Sprintf("__ct_unknown_hole_%d__", index)
+			if strings.Contains(lowerKnown, token) || used[token] {
+				continue
+			}
+			used[token] = true
+			holes = append(holes, token)
+			text.WriteString(token)
+			break
+		}
+	}
+	return stringCandidate{text: text.String(), holes: holes}
+}
+
+func stringValue(expr ast.Expr, f *function, a assignments, seen map[types.Object]bool) stringExpression {
 	if v, ok := f.pkg.TypesInfo.Types[expr]; ok && v.Value != nil && v.Value.Kind() == constant.String {
-		return constant.StringVal(v.Value), true
+		return knownString(constant.StringVal(v.Value))
 	}
 	switch e := expr.(type) {
 	case *ast.ParenExpr:
 		return stringValue(e.X, f, a, seen)
 	case *ast.BinaryExpr:
 		if e.Op == token.ADD {
-			x, xok := stringValue(e.X, f, a, seen)
-			y, yok := stringValue(e.Y, f, a, seen)
-			return x + y, xok && yok
+			x := stringValue(e.X, f, a, seen)
+			y := stringValue(e.Y, f, a, seen)
+			parts := append([]stringPart{}, x.parts...)
+			parts = append(parts, y.parts...)
+			return stringExpression{parts: parts, complete: x.complete && y.complete}
 		}
 	case *ast.Ident:
 		obj := f.pkg.TypesInfo.ObjectOf(e)
 		if c, ok := obj.(*types.Const); ok && c.Val().Kind() == constant.String {
-			return constant.StringVal(c.Val()), true
+			return knownString(constant.StringVal(c.Val()))
 		}
 		if obj != nil && !seen[obj] && a.counts[obj] == 1 {
 			seen[obj] = true
-			value, ok := stringValue(a.values[obj], f, a, seen)
+			value := stringValue(a.values[obj], f, a, seen)
 			delete(seen, obj)
-			return value, ok
+			return value
 		}
 	}
-	return unknown, false
+	return unknownString()
 }
 func (ix *index) resource(from, key, name, kind, relationship string, pos token.Pos) {
 	evidence := ix.evidence(pos)
@@ -222,26 +276,35 @@ func (ix *index) resource(from, key, name, kind, relationship string, pos token.
 	ix.edge(from, key, relationship, "possible", pos)
 }
 
-func (ix *index) stringCandidates(expr ast.Expr, f *function, a assignments) ([]string, bool) {
-	text, complete := stringValue(expr, f, a, map[types.Object]bool{})
-	if complete {
-		return []string{text}, true
+func (ix *index) stringCandidates(expr ast.Expr, f *function, a assignments) ([]stringCandidate, bool) {
+	value := stringValue(expr, f, a, map[types.Object]bool{})
+	if value.complete {
+		return []stringCandidate{value.candidate()}, true
 	}
 	if ix.flow != nil {
 		value := ix.flow.positions[expr.Pos()]
 		if call, ok := expr.(*ast.CallExpr); ok {
 			ix.flow.merge(&value, ix.flow.positions[call.Lparen])
 		}
-		values := []string{}
+		values := []stringCandidate{}
 		for s := range value.strings {
-			values = append(values, s)
+			values = append(values, stringCandidate{text: s})
 		}
-		sort.Strings(values)
+		sort.Slice(values, func(i, j int) bool { return values[i].text < values[j].text })
 		if len(values) > 0 {
 			return values, false
 		}
 	}
-	return []string{text}, false
+	return []stringCandidate{value.candidate()}, false
+}
+
+func tableHasHole(table string, candidate stringCandidate) bool {
+	for _, hole := range candidate.holes {
+		if strings.Contains(table, hole) {
+			return true
+		}
+	}
+	return false
 }
 func (ix *index) semantic(c Config) error {
 	ix.databaseOriginBoundaries(c)
@@ -272,8 +335,8 @@ func (ix *index) semantic(c Config) error {
 				ix.boundaries = append(ix.boundaries, Boundary{Node: id, Kind: "dynamic_event", Reason: "configured event field uses a value that is not statically resolved", Evidence: ix.evidence(expr.Pos())})
 			}
 			for _, value := range values {
-				if value != "" && !strings.Contains(value, unknown) {
-					ix.resource(id, resourceID("event", "", value), value, "event", role, expr.Pos())
+				if value.text != "" && len(value.holes) == 0 {
+					ix.resource(id, resourceID("event", "", value.text), value.text, "event", role, expr.Pos())
 				}
 			}
 		}
@@ -322,19 +385,21 @@ func (ix *index) semantic(c Config) error {
 						ix.boundaries = append(ix.boundaries, Boundary{Node: id, Kind: "dynamic_sql", Reason: "query contains unresolved or multiply assigned values; only resolvable table fragments are inventoried", Evidence: ix.evidence(v.Args[arg].Pos())})
 					}
 					tables := []sqlAccess{}
+					queries := make([]string, 0, len(texts))
 					for _, text := range texts {
-						for _, found := range ix.sqlAccesses(id, text, ix.evidence(v.Pos())) {
-							tables = append(tables, found.access)
+						queries = append(queries, text.text)
+						for _, found := range ix.sqlAccesses(id, text.text, ix.evidence(v.Pos())) {
+							if !tableHasHole(found.access.table, text) {
+								tables = append(tables, found.access)
+							}
 						}
 					}
-					if complete && len(tables) == 0 && !ix.parsedSQL(texts) {
+					if complete && len(tables) == 0 && !ix.parsedSQL(queries) {
 						ix.boundaries = append(ix.boundaries, Boundary{Node: id, Kind: "unparsed_sql", Reason: "configured SQL method has no recognized table access; statement or wrapper may be unsupported", Evidence: ix.evidence(v.Pos())})
 					}
 					for _, access := range tables {
-						if !strings.Contains(access.table, unknown) {
-							for _, namespace := range namespaces {
-								ix.sqlTableAccess(id, resourceID("table", namespace, access.table), access.table, access.role, v)
-							}
+						for _, namespace := range namespaces {
+							ix.sqlTableAccess(id, resourceID("table", namespace, access.table), access.table, access.role, v)
 						}
 					}
 				case *ast.CompositeLit:

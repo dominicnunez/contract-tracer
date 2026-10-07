@@ -222,9 +222,6 @@ func (a *flowAnalysis) emitBoundLifecycleRole(call ssa.CallInstruction, from str
 		outside = outside || selected.stringUnknown
 	}
 	for _, candidate := range sortedKeys(candidates) {
-		if strings.Contains(candidate, unknown) {
-			continue
-		}
 		resolved = true
 		outside = outside || strings.HasPrefix(candidate, "input:") || a.inputRoots[candidate]
 		key := resourceID("lifecycle", rule.Namespace, candidate)
