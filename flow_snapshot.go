@@ -22,7 +22,7 @@ func snapshotFlow(source flowValue) flowValue {
 	if source.boundReceivers != nil {
 		result.boundReceivers = make(map[*ssa.Function]boundReceiverCandidates, len(source.boundReceivers))
 		for fn, receivers := range source.boundReceivers {
-			result.boundReceivers[fn] = boundReceiverCandidates{addresses: snapshotCandidates(receivers.addresses), unknown: receivers.unknown}
+			result.boundReceivers[fn] = boundReceiverCandidates{addresses: snapshotCandidates(receivers.addresses), typ: receivers.typ, unknown: receivers.unknown}
 		}
 	}
 	result.addresses = snapshotCandidates(source.addresses)

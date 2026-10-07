@@ -60,12 +60,16 @@ func TestFlowReadSnapshotIsolationAndAllocationBound(t *testing.T) {
 
 func TestBoundReceiverSnapshotIsolation(t *testing.T) {
 	fn := new(ssa.Function)
+	receiverType := types.NewPointer(types.NewStruct(nil, nil))
 	source := emptyFlow()
 	source.boundReceivers = map[*ssa.Function]boundReceiverCandidates{
-		fn: {addresses: map[string]bool{"database:primary": true}},
+		fn: {addresses: map[string]bool{"database:primary": true}, typ: receiverType},
 	}
 	first := snapshotFlow(source)
 	receivers := first.boundReceivers[fn]
+	if !types.Identical(receivers.typ, receiverType) {
+		t.Fatal("snapshot lost the receiver type needed to walk exported callback fields")
+	}
 	delete(receivers.addresses, "database:primary")
 	receivers.addresses["database:mutated"] = true
 	first.boundReceivers[fn] = receivers
@@ -99,7 +103,7 @@ func TestZeroAggregateSnapshotIsolationAndEmptyAllocation(t *testing.T) {
 	}
 }
 
-func TestBoundReceiverCaptureRequiresConfiguredCallRules(t *testing.T) {
+func TestBoundReceiverCaptureHelperHonorsEnablement(t *testing.T) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "bound.go", "package bound\ntype DB struct{}\nfunc (*DB) Exec(string) {}\nfunc use(db *DB) { db.Exec(\"query\") }\n", 0)
 	if err != nil {
@@ -131,13 +135,17 @@ func TestBoundReceiverCaptureRequiresConfiguredCallRules(t *testing.T) {
 	receiver.addresses["database:primary"] = true
 	receiver.interfaceUnknown = true
 	result := emptyFlow()
-	captureBoundMethodReceiver(&result, target, receiver, false)
+	captureBoundMethodReceiver(&result, target, receiver, target.Signature.Recv().Type(), false)
 	if len(result.boundReceivers) != 0 {
 		t.Fatal("default configuration captured CallRules-only receiver metadata")
 	}
-	captureBoundMethodReceiver(&result, target, receiver, true)
+	receiverType := target.Signature.Recv().Type()
+	captureBoundMethodReceiver(&result, target, receiver, receiverType, true)
 	if !result.boundReceivers[target].addresses["database:primary"] || !result.boundReceivers[target].unknown {
-		t.Fatal("configured CallRules omitted known receiver or interface uncertainty")
+		t.Fatal("enabled bound receiver capture omitted address or interface uncertainty")
+	}
+	if !types.Identical(result.boundReceivers[target].typ, receiverType) {
+		t.Fatal("bound receiver capture lost its declared type")
 	}
 }
 

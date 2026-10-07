@@ -15,24 +15,83 @@ func (a *flowAnalysis) callbackEscape(call ssa.CallInstruction, ix *index) bool 
 		return false
 	}
 	changed := false
+	record := func(callback *ssa.Function) {
+		if callback == nil || ix.owner(callback) == "" {
+			return
+		}
+		if a.callbackEscapes == nil {
+			a.callbackEscapes = map[ssa.CallInstruction]map[*ssa.Function]bool{}
+		}
+		if a.callbackEscapes[call] == nil {
+			a.callbackEscapes[call] = map[*ssa.Function]bool{}
+		}
+		a.callbackEscapes[call][callback] = true
+		if a.markCallbackInputs(callback, ix) {
+			changed = true
+		}
+	}
 	for _, argument := range call.Common().Args {
 		for _, callback := range sortedFunctions(a.accessibleCallbacks(argument)) {
-			if ix.owner(callback) == "" {
-				continue
-			}
-			if a.callbackEscapes == nil {
-				a.callbackEscapes = map[ssa.CallInstruction]map[*ssa.Function]bool{}
-			}
-			if a.callbackEscapes[call] == nil {
-				a.callbackEscapes[call] = map[*ssa.Function]bool{}
-			}
-			a.callbackEscapes[call][callback] = true
-			if a.markCallbackInputs(callback, ix) {
-				changed = true
+			record(callback)
+		}
+	}
+	callable := a.get(call.Common().Value)
+	for _, target := range sortedFunctions(a.targets(call.Common())) {
+		if !callbackTargetOutside(target, ix) {
+			continue
+		}
+		receiver, ok := callable.boundReceivers[target]
+		if !ok || receiver.typ == nil {
+			continue
+		}
+		for _, address := range sortedKeys(receiver.addresses) {
+			root := emptyFlow()
+			root.addresses[address] = true
+			for _, callback := range sortedFunctions(a.accessibleStorageTrackedFlow(root, receiver.typ, nil, nil, nil, nil, nil, nil)) {
+				record(callback)
 			}
 		}
 	}
 	return changed
+}
+
+func callbackTargetOutside(target *ssa.Function, ix *index) bool {
+	return target != nil && ix != nil && (ix.owner(target) == "" || len(target.Blocks) == 0)
+}
+
+func callbackStorageType(typ types.Type, seen map[types.Type]bool) bool {
+	if typ == nil {
+		return false
+	}
+	typ = types.Unalias(typ)
+	if seen[typ] {
+		return false
+	}
+	seen[typ] = true
+	switch underlying := typ.Underlying().(type) {
+	case *types.Signature:
+		return true
+	case *types.Pointer:
+		return callbackStorageType(underlying.Elem(), seen)
+	case *types.Array:
+		return callbackStorageType(underlying.Elem(), seen)
+	case *types.Slice:
+		return callbackStorageType(underlying.Elem(), seen)
+	case *types.Chan:
+		return callbackStorageType(underlying.Elem(), seen)
+	case *types.Map:
+		return callbackStorageType(underlying.Key(), seen) || callbackStorageType(underlying.Elem(), seen)
+	case *types.Interface:
+		return true
+	case *types.Struct:
+		for field := 0; field < underlying.NumFields(); field++ {
+			member := underlying.Field(field)
+			if (member.Exported() || embeddedRecord(member)) && callbackStorageType(member.Type(), seen) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (a *flowAnalysis) callbackOutside(common *ssa.CallCommon, ix *index) bool {
@@ -41,9 +100,24 @@ func (a *flowAnalysis) callbackOutside(common *ssa.CallCommon, ix *index) bool {
 	}
 	outside := a.get(common.Value).functionUnknown || common.IsInvoke() && a.get(common.Value).interfaceUnknown
 	for target := range a.targets(common) {
-		outside = outside || ix.owner(target) == "" || len(target.Blocks) == 0
+		outside = outside || callbackTargetOutside(target, ix)
 	}
 	return outside
+}
+
+func (a *flowAnalysis) boundCallbackReceiverUnknown(common *ssa.CallCommon, ix *index) bool {
+	callable := a.get(common.Value)
+	for _, target := range sortedFunctions(a.targets(common)) {
+		if !callbackTargetOutside(target, ix) {
+			continue
+		}
+		if receiver, ok := callable.boundReceivers[target]; ok && callbackStorageType(receiver.typ, map[types.Type]bool{}) {
+			if receiver.unknown || callable.boundReceiverUnknown {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (a *flowAnalysis) markCallbackInputs(callback *ssa.Function, ix *index) bool {
@@ -112,7 +186,7 @@ func (a *flowAnalysis) accessibleCallbacks(value ssa.Value) map[*ssa.Function]bo
 		return cached.functions
 	}
 	cached := &callbackStorageCache{roots: roots, reads: map[string]uint64{}, types: map[string]types.Type{}, mapSizes: map[string]int{}}
-	found := a.accessibleStorageTracked(value, nil, nil, nil, nil, cached, nil)
+	found := a.accessibleStorageTrackedFlow(roots, value.Type(), nil, nil, nil, nil, cached, nil)
 	if !cached.volatile {
 		if a.callbackCache == nil {
 			a.callbackCache = map[ssa.Value]*callbackStorageCache{}
@@ -132,6 +206,10 @@ func (a *flowAnalysis) accessibleStorage(value ssa.Value, sqlCells, functionCell
 }
 
 func (a *flowAnalysis) accessibleStorageTracked(value ssa.Value, sqlCells, functionCells, interfaceCells map[string]bool, outsideCells map[string]types.Type, cache *callbackStorageCache, effects map[string]bool) map[*ssa.Function]bool {
+	return a.accessibleStorageTrackedFlow(a.get(value), value.Type(), sqlCells, functionCells, interfaceCells, outsideCells, cache, effects)
+}
+
+func (a *flowAnalysis) accessibleStorageTrackedFlow(root flowValue, typ types.Type, sqlCells, functionCells, interfaceCells map[string]bool, outsideCells map[string]types.Type, cache *callbackStorageCache, effects map[string]bool) map[*ssa.Function]bool {
 	markOutsideCell := func(address string, typ types.Type) {
 		if outsideCells != nil && (isErrorType(typ) || isStringType(typ) || isScalarType(typ)) {
 			outsideCells[address] = typ
@@ -151,7 +229,7 @@ func (a *flowAnalysis) accessibleStorageTracked(value ssa.Value, sqlCells, funct
 		address string
 		typ     types.Type
 	}
-	queue := []entry{{a.get(value), value.Type()}}
+	queue := []entry{{root, typ}}
 	enqueue := func(contents flowValue, typ types.Type) {
 		if len(contents.functions) == 0 && len(contents.addresses) == 0 && len(contents.effects) == 0 {
 			return
@@ -171,6 +249,9 @@ func (a *flowAnalysis) accessibleStorageTracked(value ssa.Value, sqlCells, funct
 			break
 		}
 		current := queue[head]
+		if current.typ == nil {
+			continue
+		}
 		if cache != nil && len(current.value.effects) != 0 {
 			cache.volatile = true
 		}
@@ -353,5 +434,8 @@ func (a *flowAnalysis) callbackEscapeRelationships(call ssa.CallInstruction, ix 
 				break
 			}
 		}
+	}
+	if a.boundCallbackReceiverUnknown(call.Common(), ix) {
+		ix.boundaries = append(ix.boundaries, Boundary{Node: ix.owner(call.Parent()), Kind: "unresolved_callback_receiver", Reason: "a bound external method receiver has widened or unresolved storage candidates; exported callback fields on omitted receiver alternatives may also escape", Evidence: ix.callEvidence(call)})
 	}
 }

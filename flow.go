@@ -40,6 +40,7 @@ type flowValue struct {
 
 type boundReceiverCandidates struct {
 	addresses map[string]bool
+	typ       types.Type
 	unknown   bool
 }
 
@@ -47,7 +48,7 @@ func emptyFlow() flowValue {
 	return flowValue{strings: map[string]bool{}, functions: map[*ssa.Function]bool{}, addresses: map[string]bool{}, effects: map[string]bool{}}
 }
 
-func captureBoundMethodReceiver(result *flowValue, target *ssa.Function, receiver flowValue, enabled bool) {
+func captureBoundMethodReceiver(result *flowValue, target *ssa.Function, receiver flowValue, receiverType types.Type, enabled bool) {
 	if !enabled || target == nil || result == nil {
 		return
 	}
@@ -60,8 +61,20 @@ func captureBoundMethodReceiver(result *flowValue, target *ssa.Function, receive
 		return
 	}
 	result.boundReceivers = map[*ssa.Function]boundReceiverCandidates{
-		target: {addresses: snapshotCandidates(receiver.addresses), unknown: receiver.sqlUnknown || receiver.boundReceiverUnknown || receiver.interfaceUnknown},
+		target: {addresses: snapshotCandidates(receiver.addresses), typ: receiverType, unknown: receiver.sqlUnknown || receiver.boundReceiverUnknown || receiver.interfaceUnknown},
 	}
+}
+
+func isBoundMethodTarget(target *ssa.Function) bool {
+	if target == nil {
+		return false
+	}
+	method, ok := target.Object().(*types.Func)
+	if !ok {
+		return false
+	}
+	signature, ok := method.Type().(*types.Signature)
+	return ok && signature.Recv() != nil
 }
 
 type flowAnalysis struct {
@@ -331,6 +344,13 @@ func (a *flowAnalysis) merge(dst *flowValue, src flowValue) bool {
 				continue
 			}
 			localChanged := false
+			if current.typ == nil && receivers.typ != nil {
+				current.typ = receivers.typ
+				localChanged = true
+			} else if current.typ != nil && receivers.typ != nil && !types.Identical(current.typ, receivers.typ) && !current.unknown {
+				current.unknown = true
+				localChanged = true
+			}
 			if current.addresses == nil {
 				current.addresses = map[string]bool{}
 			}
@@ -829,21 +849,31 @@ func (ix *index) analyzeFlow(ctx context.Context, prog *ssa.Program, graph *call
 						if len(v.Bindings) > 0 {
 							if method, ok := isSQLHandleMethodTarget(target); ok {
 								receiver := a.get(v.Bindings[0])
-								projected, _, status := a.projectMethodExpressionReceiver(receiver, v.Bindings[0].Type(), method)
+								projected, selected, status := a.projectMethodExpressionReceiver(receiver, v.Bindings[0].Type(), method)
 								if status == methodReceiverProjectionUnsupported {
 									projected = unresolvedProjectedReceiver()
 								}
-								captureBoundMethodReceiver(&result, target, projected, true)
+								receiverType := v.Bindings[0].Type()
+								if selected != nil && selected.Recv() != nil {
+									receiverType = selected.Recv().Type()
+								}
+								captureBoundMethodReceiver(&result, target, projected, receiverType, true)
 							} else if method, ok := target.Object().(*types.Func); ok && (contextAdapterName(method) == "Done" || contextAdapterName(method) == "Err") && contextSelectedMethod(v.Bindings[0].Type(), contextAdapterName(method)) != nil {
 								method = contextSelectedMethod(v.Bindings[0].Type(), contextAdapterName(method))
 								receiver := a.get(v.Bindings[0])
-								projected, _, status := a.projectMethodExpressionReceiver(receiver, v.Bindings[0].Type(), method)
+								projected, selected, status := a.projectMethodExpressionReceiver(receiver, v.Bindings[0].Type(), method)
 								if status == methodReceiverProjectionUnsupported {
 									projected = unresolvedProjectedReceiver()
 								}
-								captureBoundMethodReceiver(&result, target, projected, true)
+								receiverType := v.Bindings[0].Type()
+								if selected != nil && selected.Recv() != nil {
+									receiverType = selected.Recv().Type()
+								}
+								captureBoundMethodReceiver(&result, target, projected, receiverType, true)
 							} else if len(config.CallRules) > 0 {
-								captureBoundMethodReceiver(&result, target, a.get(v.Bindings[0]), true)
+								captureBoundMethodReceiver(&result, target, a.get(v.Bindings[0]), v.Bindings[0].Type(), true)
+							} else if isBoundMethodTarget(target) && callbackTargetOutside(target, ix) && callbackStorageType(v.Bindings[0].Type(), map[types.Type]bool{}) {
+								captureBoundMethodReceiver(&result, target, a.get(v.Bindings[0]), v.Bindings[0].Type(), true)
 							}
 						}
 						a.modelWaitGroupBinding(v, &result)
