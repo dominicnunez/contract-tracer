@@ -93,7 +93,7 @@ type flowAnalysis struct {
 	doneChannels              map[string]string
 	invokes                   map[*ssa.CallCommon]map[*ssa.Function]bool
 	sqlHandles                map[string]sqlHandle
-	statementExecutions       map[token.Pos]flowValue
+	statementExecutions       map[token.Pos]map[string]flowValue
 	sqlOperations             map[token.Pos]map[string]bool
 	sqlReceivers              map[token.Pos]flowValue
 	callbackEscapes           map[ssa.CallInstruction]map[*ssa.Function]bool

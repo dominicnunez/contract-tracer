@@ -294,11 +294,14 @@ func (a *flowAnalysis) sqlHandleUse(call ssa.CallInstruction, ix *index) {
 		}
 		if receiver == "Stmt" && (strings.HasPrefix(name, "Exec") || strings.HasPrefix(name, "Query")) {
 			if a.statementExecutions == nil {
-				a.statementExecutions = map[token.Pos]flowValue{}
+				a.statementExecutions = map[token.Pos]map[string]flowValue{}
 			}
-			old := a.statementExecutions[position]
+			if a.statementExecutions[position] == nil {
+				a.statementExecutions[position] = map[string]flowValue{}
+			}
+			old := a.statementExecutions[position][name]
 			a.merge(&old, value)
-			a.statementExecutions[position] = old
+			a.statementExecutions[position][name] = old
 		}
 		kind := ""
 		if receiver == "Stmt" && name == "Close" {
@@ -410,45 +413,54 @@ func (a *flowAnalysis) sqlQueryOrigins(key string) ([]sqlQueryOrigin, bool) {
 	return result, unresolved || len(result) == 0
 }
 
-func (ix *index) preparedSQL(id string, f *function, call *ast.CallExpr, config Config) (bool, error) {
-	selector, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || sqlReceiver(f.pkg.TypesInfo.TypeOf(selector.X)) != "Stmt" || !contains(config.SQLMethods, selector.Sel.Name) {
+func (ix *index) preparedSQL(id string, call *ast.CallExpr, config Config) (bool, error) {
+	if ix.flow == nil {
+		return false, nil
+	}
+	executions := ix.flow.statementExecutions[call.Lparen]
+	var execution flowValue
+	configured := false
+	for _, name := range sortedKeys(executions) {
+		if !contains(config.SQLMethods, name) {
+			continue
+		}
+		configured = true
+		ix.flow.merge(&execution, executions[name])
+	}
+	if !configured {
 		return false, nil
 	}
 	found := false
 	unresolved := false
-	if ix.flow != nil {
-		execution := ix.flow.statementExecutions[call.Lparen]
-		keys := sortedKeys(execution.addresses)
-		unresolved = len(keys) == 0 || execution.sqlUnknown || execution.interfaceUnknown
-		for _, key := range keys {
-			origins, missing := ix.flow.sqlQueryOrigins(key)
-			unresolved = unresolved || missing
-			for _, origin := range origins {
-				site := ix.flow.sqlHandles[origin.handle]
-				namespaceOverride := ""
-				for _, rule := range config.CallRules {
-					if rule.Symbol == origin.symbol && rule.Kind == "sql_query" {
-						namespaceOverride = rule.Namespace
-					}
+	keys := sortedKeys(execution.addresses)
+	unresolved = len(keys) == 0 || execution.sqlUnknown || execution.interfaceUnknown
+	for _, key := range keys {
+		origins, missing := ix.flow.sqlQueryOrigins(key)
+		unresolved = unresolved || missing
+		for _, origin := range origins {
+			site := ix.flow.sqlHandles[origin.handle]
+			namespaceOverride := ""
+			for _, rule := range config.CallRules {
+				if rule.Symbol == origin.symbol && rule.Kind == "sql_query" {
+					namespaceOverride = rule.Namespace
 				}
-				namespaces, err := ix.receiverNamespaces(site.owner, ix.evidence(site.position), []string{origin.handle}, execution.sqlUnknown || execution.interfaceUnknown, namespaceOverride, config)
-				if err != nil {
-					return true, err
-				}
-				queryValue := ix.flow.get(origin.query)
-				queries := sortedKeys(queryValue.strings)
-				unresolved = unresolved || queryValue.stringUnknown
-				if len(queries) == 0 {
-					unresolved = true
-				}
-				for _, query := range queries {
-					found = true
-					for _, access := range ix.sqlAccesses(key, query, ix.evidence(site.position)) {
-						for _, namespace := range namespaces {
-							ix.resource(origin.handle, resourceID("table", namespace, access.access.table), access.access.table, "table", "prepared_sql_"+access.access.role, site.position)
-							ix.sqlTableAccess(id, resourceID("table", namespace, access.access.table), access.access.table, access.access.role, call)
-						}
+			}
+			namespaces, err := ix.receiverNamespaces(site.owner, ix.evidence(site.position), []string{origin.handle}, execution.sqlUnknown || execution.interfaceUnknown, namespaceOverride, config)
+			if err != nil {
+				return true, err
+			}
+			queryValue := ix.flow.get(origin.query)
+			queries := sortedKeys(queryValue.strings)
+			unresolved = unresolved || queryValue.stringUnknown
+			if len(queries) == 0 {
+				unresolved = true
+			}
+			for _, query := range queries {
+				found = true
+				for _, access := range ix.sqlAccesses(key, query, ix.evidence(site.position)) {
+					for _, namespace := range namespaces {
+						ix.resource(origin.handle, resourceID("table", namespace, access.access.table), access.access.table, "table", "prepared_sql_"+access.access.role, site.position)
+						ix.sqlTableAccess(id, resourceID("table", namespace, access.access.table), access.access.table, access.access.role, call)
 					}
 				}
 			}

@@ -293,7 +293,7 @@ func (ix *index) semantic(c Config) error {
 					if handled {
 						break
 					}
-					prepared, err := ix.preparedSQL(id, f, v, c)
+					prepared, err := ix.preparedSQL(id, v, c)
 					if err != nil {
 						semanticErr = err
 						return false
