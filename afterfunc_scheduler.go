@@ -59,7 +59,7 @@ func (a *flowAnalysis) afterFuncSchedulerFlow() bool {
 	changed := false
 	for _, key := range sortedKeys(a.afterFuncs) {
 		site := a.afterFuncs[key]
-		if a.bindCancellationScheduler(a.get(site.context), "afterfunc_dispatch:"+key) {
+		if a.bindCancellationScheduler(site.context, "afterfunc_dispatch:"+key) {
 			changed = true
 		}
 	}
@@ -139,7 +139,7 @@ func (a *flowAnalysis) schedulerReceiver(value flowValue, target *ssa.Function) 
 }
 
 func (a *flowAnalysis) afterFuncSchedulerRelationships(key string, site afterFuncSite, ix *index) {
-	receiver := a.get(site.context)
+	receiver := site.context
 	evidence := ix.callEvidence(site.call)
 	a.cancellationSchedulerRelationships(key, receiver, evidence, "cancellation_callback_scheduler", "cancellation_scheduler_stop_target", ix)
 }

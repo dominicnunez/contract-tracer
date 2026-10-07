@@ -9,13 +9,13 @@ import (
 
 type afterFuncSite struct {
 	call              ssa.CallInstruction
-	context, callback ssa.Value
+	context, callback flowValue
 }
 
-func (a *flowAnalysis) modelAfterFunc(call ssa.CallInstruction, ix *index) {
+func (a *flowAnalysis) modelAfterFunc(call ssa.CallInstruction, ix *index) bool {
 	common := call.Common()
 	if common.IsInvoke() || len(common.Args) != 2 {
-		return
+		return false
 	}
 	modeled, outside := false, a.get(common.Value).functionUnknown
 	for target := range a.targets(common) {
@@ -26,14 +26,20 @@ func (a *flowAnalysis) modelAfterFunc(call ssa.CallInstruction, ix *index) {
 		}
 	}
 	if !modeled {
-		return
+		return false
 	}
 	evidence := ix.callEvidence(call)
 	key := resourceID("afterfunc", "", fmt.Sprintf("%s:%d:%d", evidence.File, evidence.Line, evidence.Column))
 	if a.afterFuncs == nil {
 		a.afterFuncs = map[string]afterFuncSite{}
 	}
-	a.afterFuncs[key] = afterFuncSite{call: call, context: common.Args[0], callback: common.Args[1]}
+	site := a.afterFuncs[key]
+	if site.call == nil {
+		site.call = call
+	}
+	changed := a.merge(&site.context, a.get(common.Args[0]))
+	changed = a.merge(&site.callback, a.get(common.Args[1])) || changed
+	a.afterFuncs[key] = site
 	if result, ok := call.(*ssa.Call); ok {
 		if a.special == nil {
 			a.special = map[*ssa.Call][]flowValue{}
@@ -46,6 +52,7 @@ func (a *flowAnalysis) modelAfterFunc(call ssa.CallInstruction, ix *index) {
 	if ix.funcs[key] == nil {
 		ix.funcs[key] = &function{node: Node{ID: key, Name: "AfterFunc at " + evidence.File + fmt.Sprintf(":%d:%d", evidence.Line, evidence.Column), Kind: "callback_registration", Evidence: evidence}}
 	}
+	return changed
 }
 
 func isAfterFunc(target *ssa.Function) bool {
@@ -92,7 +99,7 @@ func (a *flowAnalysis) afterFuncRelationships(ix *index) {
 		ix.edges = append(ix.edges, Relationship{From: ix.owner(site.call.Parent()), To: key, Kind: afterFuncKind(site.call, "cancellation_callback_register"), Certainty: certainty, Evidence: evidence})
 		ix.boundaries = append(ix.boundaries, Boundary{Node: key, Kind: "cancellation_callback_model", Reason: "source registration links a context, callback candidates and returned stop handle; runtime registration count, custom Context scheduling, cancellation/stop races, stop result, callback execution and completion ordering are not proved; calling stop does not establish callback completion", Evidence: evidence})
 		a.afterFuncSchedulerRelationships(key, site, ix)
-		contextValue := a.get(site.context)
+		contextValue := site.context
 		known := false
 		for _, context := range sortedKeys(contextValue.addresses) {
 			creation, found := a.contextKeys[context]
@@ -108,7 +115,7 @@ func (a *flowAnalysis) afterFuncRelationships(ix *index) {
 		if !known || contextValue.interfaceUnknown {
 			ix.boundaries = append(ix.boundaries, Boundary{Node: key, Kind: "unresolved_callback_context", Reason: "cancellation registration retains an outside or unmodeled context candidate; known local creation sites do not close its runtime origin set", Evidence: evidence})
 		}
-		callback := a.get(site.callback)
+		callback := site.callback
 		known = false
 		for _, effect := range sortedKeys(callback.effects) {
 			if strings.HasPrefix(effect, "cancel:") {

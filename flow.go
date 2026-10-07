@@ -910,7 +910,9 @@ func (ix *index) analyzeFlow(ctx context.Context, prog *ssa.Program, graph *call
 						if a.callbackEscape(v, ix) {
 							changed = true
 						}
-						a.modelContext(v, ix)
+						if a.modelContext(v, ix) {
+							changed = true
+						}
 						a.modelSQLHandle(v, ix)
 						if a.seedAggregateResult(v, v, ix, false) {
 							changed = true
@@ -933,8 +935,12 @@ func (ix *index) analyzeFlow(ctx context.Context, prog *ssa.Program, graph *call
 							}
 						}
 					case *ssa.Defer:
-						a.modelAfterFunc(v, ix)
-						a.modelContext(v, ix)
+						if a.modelAfterFunc(v, ix) {
+							changed = true
+						}
+						if a.modelContext(v, ix) {
+							changed = true
+						}
 						a.modelSQLHandle(v, ix)
 						if a.sliceBuiltin(v, ix, &result) {
 							changed = true
@@ -946,8 +952,12 @@ func (ix *index) analyzeFlow(ctx context.Context, prog *ssa.Program, graph *call
 							changed = true
 						}
 					case *ssa.Go:
-						a.modelAfterFunc(v, ix)
-						a.modelContext(v, ix)
+						if a.modelAfterFunc(v, ix) {
+							changed = true
+						}
+						if a.modelContext(v, ix) {
+							changed = true
+						}
 						a.modelSQLHandle(v, ix)
 						if a.sliceBuiltin(v, ix, &result) {
 							changed = true

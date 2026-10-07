@@ -18,9 +18,10 @@ type contextSite struct {
 	parent           ssa.Value
 }
 
-func (a *flowAnalysis) modelContext(call ssa.CallInstruction, ix *index) {
+func (a *flowAnalysis) modelContext(call ssa.CallInstruction, ix *index) bool {
+	changed := false
 	if direct, ok := call.(*ssa.Call); ok {
-		a.modelAfterFunc(direct, ix)
+		changed = a.modelAfterFunc(direct, ix)
 		a.modelDone(direct, ix)
 	}
 	common := call.Common()
@@ -40,7 +41,7 @@ func (a *flowAnalysis) modelContext(call ssa.CallInstruction, ix *index) {
 		}
 	}
 	if len(names) == 0 {
-		return
+		return changed
 	}
 	name := names[0]
 	needsCancel := false
@@ -50,7 +51,7 @@ func (a *flowAnalysis) modelContext(call ssa.CallInstruction, ix *index) {
 			needsCancel = true
 		case "Background", "TODO", "WithValue", "WithoutCancel":
 		default:
-			return
+			return changed
 		}
 	}
 	if a.contexts == nil {
@@ -97,6 +98,7 @@ func (a *flowAnalysis) modelContext(call ssa.CallInstruction, ix *index) {
 	if ix.funcs[key] == nil {
 		ix.funcs[key] = &function{node: Node{ID: key, Name: "context at " + evidence.File + fmt.Sprintf(":%d:%d", evidence.Line, evidence.Column), Kind: "context", Evidence: evidence}}
 	}
+	return changed
 }
 
 func contextConstructorName(target *ssa.Function) string {
