@@ -1,6 +1,7 @@
 package contracttrace
 
 import (
+	"fmt"
 	"go/token"
 	"go/types"
 	"strings"
@@ -157,25 +158,33 @@ func (a *flowAnalysis) globalUse(instruction ssa.Instruction, ix *index) {
 		link(use.X, "global_read")
 	case ssa.CallInstruction:
 		common := use.Common()
-		builtin, ok := common.Value.(*ssa.Builtin)
-		if !ok || len(common.Args) == 0 {
+		if builtin, ok := common.Value.(*ssa.Builtin); ok {
+			if len(common.Args) == 0 {
+				return
+			}
+			switch builtin.Name() {
+			case "delete", "clear":
+				link(common.Args[0], "global_write")
+			case "copy":
+				if len(common.Args) == 2 {
+					link(common.Args[0], "global_write")
+					link(common.Args[1], "global_read")
+				}
+			case "append":
+				link(common.Args[0], "global_write")
+				for _, argument := range common.Args {
+					link(argument, "global_read")
+				}
+			case "len", "cap":
+				link(common.Args[0], "global_read")
+			}
 			return
 		}
-		switch builtin.Name() {
-		case "delete", "clear":
-			link(common.Args[0], "global_write")
-		case "copy":
-			if len(common.Args) == 2 {
-				link(common.Args[0], "global_write")
-				link(common.Args[1], "global_read")
-			}
-		case "append":
-			link(common.Args[0], "global_write")
-			for _, argument := range common.Args {
-				link(argument, "global_read")
-			}
-		case "len", "cap":
-			link(common.Args[0], "global_read")
+		if !a.callbackOutside(common, ix) {
+			return
+		}
+		for _, argument := range flowArguments(common) {
+			link(argument, "global_escape")
 		}
 	}
 }
@@ -210,5 +219,8 @@ func (a *flowAnalysis) globalAccess(instruction ssa.Instruction, address ssa.Val
 			evidence.Origin = "synthetic_declaration"
 		}
 		ix.edges = append(ix.edges, Relationship{From: owner, To: id, Kind: kind, Certainty: "possible", Evidence: evidence})
+		if kind == "global_escape" {
+			ix.boundaries = append(ix.boundaries, Boundary{Node: owner, Kind: "unresolved_global_escape", Reason: fmt.Sprintf("an outside, dependency or unresolved call receives an address rooted in %s and may retain or mutate it; no specific mutation is established", id), Evidence: evidence})
+		}
 	}
 }
