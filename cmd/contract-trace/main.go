@@ -58,6 +58,13 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	if err := rejectConfigArtifactAlias(*configPath,
+		analysisArtifactPath{flag: "save-analysis", path: *saveAnalysis},
+		analysisArtifactPath{flag: "output", path: *output},
+	); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	config := trace.DefaultConfig()
 	if *configPath != "" {
 		f, err := os.Open(*configPath)

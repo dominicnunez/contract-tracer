@@ -22,6 +22,25 @@ func rejectOutputSnapshotAlias(output, snapshot, snapshotFlag string) error {
 	return nil
 }
 
+func rejectConfigArtifactAlias(config string, artifacts ...analysisArtifactPath) error {
+	if config == "" {
+		return nil
+	}
+	for _, artifact := range artifacts {
+		if artifact.path == "" {
+			continue
+		}
+		same, err := pathsAlias(config, artifact.path)
+		if err != nil {
+			return fmt.Errorf("cannot safely compare -config %q with -%s %q: %w", config, artifact.flag, artifact.path, err)
+		}
+		if same {
+			return fmt.Errorf("-config %q aliases -%s %q; choose distinct paths", config, artifact.flag, artifact.path)
+		}
+	}
+	return nil
+}
+
 func pathsAlias(first, second string) (bool, error) {
 	firstPath, err := inspectOutputPath(first)
 	if err != nil {
