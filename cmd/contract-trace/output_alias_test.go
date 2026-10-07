@@ -1,11 +1,11 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -288,6 +288,38 @@ func TestDistinctReportAndSavedAnalysisPathsWork(t *testing.T) {
 	}
 }
 
+func TestWindowsUnusualOutputNamesCannotReplaceNewAnalysis(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows path alias behavior")
+	}
+	for _, suffix := range []string{".", " ", "::$DATA"} {
+		t.Run(strings.ReplaceAll(suffix, ":", "_"), func(t *testing.T) {
+			root := t.TempDir()
+			writeCLIInput(t, root)
+			snapshot := filepath.Join(root, "analysis.json")
+			output := snapshot + suffix
+			if _, err := os.Lstat(snapshot); !os.IsNotExist(err) {
+				t.Fatalf("snapshot unexpectedly exists before run: %v", err)
+			}
+			if _, err := os.Lstat(output); !os.IsNotExist(err) {
+				t.Fatalf("output unexpectedly exists before run: %v", err)
+			}
+
+			result := runCLI(t, "-root", root, "-seed", "Validate", "-save-analysis", snapshot, "-output", output)
+			if result.err == nil {
+				contents, readErr := os.ReadFile(snapshot)
+				t.Fatalf("run accepted ambiguous Windows output %q (snapshot read error %v, bytes %q)", output, readErr, contents[:min(len(contents), 80)])
+			}
+			if !strings.Contains(result.stderr, "ambiguous Windows file name") {
+				t.Fatalf("error should explain the unsupported Windows name, got %q", result.stderr)
+			}
+			if _, err := os.Stat(snapshot); !os.IsNotExist(err) {
+				t.Fatalf("ambiguous output should be rejected before creating snapshot, stat error=%v", err)
+			}
+		})
+	}
+}
+
 type cliResult struct {
 	err    error
 	stderr string
@@ -295,30 +327,39 @@ type cliResult struct {
 
 func runCLI(t *testing.T, args ...string) cliResult {
 	t.Helper()
-	payload, err := json.Marshal(args)
+	stdout, err := os.CreateTemp(t.TempDir(), "stdout-*")
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(os.Args[0], "-test.run=TestCLIProcess")
-	command.Env = append(os.Environ(), "CONTRACT_TRACE_TEST_ARGS="+string(payload))
-	var stderr strings.Builder
-	command.Stderr = &stderr
-	err = command.Run()
-	return cliResult{err: err, stderr: stderr.String()}
-}
-
-func TestCLIProcess(t *testing.T) {
-	payload := os.Getenv("CONTRACT_TRACE_TEST_ARGS")
-	if payload == "" {
-		return
+	stderr, err := os.CreateTemp(t.TempDir(), "stderr-*")
+	if err != nil {
+		t.Fatal(err)
 	}
-	var args []string
-	if err := json.Unmarshal([]byte(payload), &args); err != nil {
-		t.Fatalf("decode CLI test arguments: %v", err)
-	}
+	oldArgs, oldFlags := os.Args, flag.CommandLine
+	oldStdout, oldStderr := os.Stdout, os.Stderr
+	defer func() {
+		os.Args, flag.CommandLine = oldArgs, oldFlags
+		os.Stdout, os.Stderr = oldStdout, oldStderr
+	}()
 	os.Args = append([]string{"contract-trace"}, args...)
 	flag.CommandLine = flag.NewFlagSet("contract-trace", flag.ContinueOnError)
-	os.Exit(run())
+	flag.CommandLine.SetOutput(stderr)
+	os.Stdout, os.Stderr = stdout, stderr
+	code := run()
+	if err := stdout.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := stderr.Close(); err != nil {
+		t.Fatal(err)
+	}
+	message, err := os.ReadFile(stderr.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 0 {
+		return cliResult{err: fmt.Errorf("run returned %d", code), stderr: string(message)}
+	}
+	return cliResult{stderr: string(message)}
 }
 
 func writeCLIInput(t *testing.T, root string) {

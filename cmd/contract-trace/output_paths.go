@@ -61,6 +61,13 @@ type outputPathIdentity struct {
 // existing parent directory and leaf name; missing parents cannot be written
 // by the current output and snapshot writers, so those paths fail closed.
 func inspectOutputPath(path string) (outputPathIdentity, error) {
+	if runtime.GOOS == "windows" {
+		_, leaf := filepath.Split(path)
+		if strings.HasSuffix(leaf, ".") || strings.HasSuffix(leaf, " ") || strings.Contains(leaf, ":") {
+			return outputPathIdentity{}, fmt.Errorf("%q has an ambiguous Windows file name; use a name without a trailing dot, trailing space, or colon", path)
+		}
+	}
+
 	if info, err := os.Stat(path); err == nil {
 		return outputPathIdentity{file: info, exists: true}, nil
 	} else if !os.IsNotExist(err) {

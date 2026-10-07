@@ -116,6 +116,9 @@ func run() int {
 		if err == nil {
 			err = saveSnapshot(*saveAnalysis, analysis)
 		}
+		if err == nil {
+			err = rejectOutputSnapshotAlias(*output, *saveAnalysis, "save-analysis")
+		}
 	} else {
 		r, err = trace.Trace(ctx, options)
 	}

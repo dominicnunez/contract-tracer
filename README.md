@@ -43,6 +43,8 @@ On Windows, run `.\contract-trace.exe` from PowerShell. Seeds may be function na
 
 Important options include `-tests`, `-tags`, `-expand-callbacks`, `-timeout`, `-format json|markdown`, `-save-analysis file.json.gz`, and `-resume file.json.gz`. The default traversal limits are depth 3 and 250 nodes. Reports retain truncation, frontiers, candidate inventories and unresolved boundaries when analysis is bounded. Saved exploration reuses the discovered graph after checking source and build identities; it does not rerun analysis to recover omitted relationships.
 
+On Windows, when `-output` is combined with `-save-analysis` or `-resume`, both paths must use ordinary file names without a trailing dot, trailing space or colon. These forms can alias another file or select an alternate data stream.
+
 ## Configuration
 
 `-config config.json` accepts one strict JSON object. Unknown fields, invalid selectors and unsupported rule kinds are errors. Omitted fields keep defaults; explicitly setting an array to `[]` disables that default list. Call and lifecycle symbols use `<Go import path>::<declared function or method>`. A storage scope's `database_origins` may also use `<Go import path>::(package init)` for a database constructor declared in a package-level variable initializer.
