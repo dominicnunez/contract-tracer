@@ -163,7 +163,7 @@ func Trace(ctx context.Context, o Options) (report Report, err error) {
 				name := functionName(obj)
 				id := p.PkgPath + "::" + name
 				if name == "init" {
-					id += fmt.Sprintf("@%s:%d", e.File, e.Line)
+					id += fmt.Sprintf("@%s:%d:%d", e.File, e.Line, e.Column)
 				}
 				ix.objects[obj.Origin()] = id
 				ix.funcs[id] = &function{node: Node{ID: id, Name: name, Kind: "function", Evidence: e}, decl: fd, pkg: p}
