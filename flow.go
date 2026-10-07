@@ -512,7 +512,7 @@ func (ix *index) analyzeFlow(ctx context.Context, prog *ssa.Program, graph *call
 		}
 	}
 	a.seedSQLInputs(funcs, ix, false)
-	a.seedFunctionInputs(funcs)
+	a.seedFunctionInputs(funcs, ix, false)
 	a.seedErrorInputs(funcs, ix, false)
 	for _, function := range funcs {
 		if function.Object() != nil && function.Object().Exported() {
@@ -1018,11 +1018,12 @@ func (ix *index) analyzeFlow(ctx context.Context, prog *ssa.Program, graph *call
 			if !uncalledInputsSeeded {
 				uncalledInputsSeeded = true
 				newInputs := a.seedSQLInputs(funcs, ix, true)
+				newFunctionInputs := a.seedFunctionInputs(funcs, ix, true)
 				newResults := a.seedUnresolvedSQLResults(funcs)
 				newFunctionResults := a.seedUnresolvedFunctionResults(funcs)
 				newErrorInputs := a.seedErrorInputs(funcs, ix, true)
 				newAggregateResults := a.seedUnresolvedAggregateResults(funcs, ix)
-				if newInputs || newResults || newFunctionResults || newAggregateResults || newErrorInputs {
+				if newInputs || newFunctionInputs || newResults || newFunctionResults || newAggregateResults || newErrorInputs {
 					continue
 				}
 			}

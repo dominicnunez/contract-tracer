@@ -9,19 +9,40 @@ import (
 
 func isFunctionType(typ types.Type) bool { _, ok := typ.Underlying().(*types.Signature); return ok }
 
-func (a *flowAnalysis) seedFunctionInputs(functions []*ssa.Function) {
+func (a *flowAnalysis) seedFunctionInputs(functions []*ssa.Function, ix *index, uncalled bool) bool {
+	called := map[*ssa.Function]bool{}
+	if uncalled {
+		for _, function := range functions {
+			for _, block := range function.Blocks {
+				for _, instruction := range block.Instrs {
+					if call, ok := instruction.(ssa.CallInstruction); ok {
+						for target := range a.targets(call.Common()) {
+							if ix.owner(target) != "" {
+								called[target] = true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	changed := false
 	for _, function := range functions {
-		if function.Object() == nil || !function.Object().Exported() {
+		exported := function.Object() != nil && function.Object().Exported()
+		if uncalled == exported || uncalled && called[function] {
 			continue
 		}
 		for _, parameter := range function.Params {
 			if isFunctionType(parameter.Type()) {
 				unknown := emptyFlow()
 				unknown.functionUnknown = true
-				a.put(parameter, unknown)
+				if a.put(parameter, unknown) {
+					changed = true
+				}
 			}
 		}
 	}
+	return changed
 }
 
 func (a *flowAnalysis) outsideFunctionResult(call *ssa.Call, ix *index) bool {
