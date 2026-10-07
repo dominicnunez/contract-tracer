@@ -257,31 +257,8 @@ func Trace(ctx context.Context, o Options) (report Report, err error) {
 	if err != nil {
 		return Report{}, err
 	}
-	after, _, err := fingerprint(root)
-	if err != nil {
-		return Report{}, err
-	}
-	if before != after {
-		return Report{}, fmt.Errorf("source changed during analysis; rerun on a stable revision")
-	}
-	assetHash, err := hashFiles(ix.root, ix.assets)
-	if err != nil {
-		return Report{}, err
-	}
-	if assetHash != ix.assetHash {
-		return Report{}, fmt.Errorf("embedded assets changed during analysis")
-	}
 	report.Coverage.LoadedSources = sources.sources()
-	if err := verifyLoadedSources(ctx, report.Coverage.LoadedSources); err != nil {
-		return Report{}, err
-	}
 	report.Coverage.LoadedSourceSHA256 = loadedSourceIdentity(report.Coverage.LoadedSources)
-	if err := verifyLoadedSources(ctx, resolution); err != nil {
-		return Report{}, fmt.Errorf("resolution input check: %w", err)
-	}
-	if err := verifyBuildEnvironment(ctx, root, env); err != nil {
-		return Report{}, err
-	}
 	report.Coverage.ResolutionInputs = resolution
 	report.Coverage.ResolutionSHA256 = loadedSourceIdentity(resolution)
 	report.Coverage.ResolutionScope = "loaded_modules.v1"
@@ -303,8 +280,15 @@ func Trace(ctx context.Context, o Options) (report Report, err error) {
 		Boundary{Kind: "lifecycle", Reason: "Go/defer and configured name hints identify investigation sites; temporal ownership, cancellation propagation and eventual cleanup are not proven."})
 	sortReport(&report)
 	groupBoundaries(&report)
+	var snapshot Analysis
 	if o.capture != nil {
-		*o.capture = ix.snapshot(report)
+		snapshot = ix.snapshot(report)
+	}
+	if err := verifyAnalysisInputs(ctx, root, env, before, ix.assets, ix.assetHash, report.Coverage.LoadedSources, resolution); err != nil {
+		return Report{}, err
+	}
+	if o.capture != nil {
+		*o.capture = snapshot
 	}
 	return report, nil
 }

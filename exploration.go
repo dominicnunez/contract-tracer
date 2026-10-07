@@ -186,6 +186,9 @@ func Explore(ctx context.Context, a Analysis, o ExploreOptions) (Report, error) 
 		report.Boundaries = append(report.Boundaries, Boundary{Kind: "legacy_dependency_module_identity", Reason: "this snapshot predates effective dependency module manifest capture; external dependency module directives are not checked, so rerun analysis for their identity"})
 	}
 	groupBoundaries(&report)
+	if err := verifyAnalysisInputs(ctx, root, a.Coverage.Build, before, a.Coverage.EmbeddedFiles, assets, a.Coverage.LoadedSources, a.Coverage.ResolutionInputs); err != nil {
+		return Report{}, err
+	}
 	return report, nil
 }
 
