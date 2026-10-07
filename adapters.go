@@ -190,6 +190,13 @@ func (ix *index) applyCallRules(id string, f *function, call *ast.CallExpr, a as
 		}
 		argumentOffset := callRuleReceiverOffset(call, f, matchedObject)
 		argumentIndex, validArgument := callRuleArgumentIndex(r.Argument, argumentOffset, len(call.Args))
+		handlerIndex, validHandler := 0, true
+		if r.HandlerArgument != nil {
+			handlerIndex, validHandler = callRuleArgumentIndex(*r.HandlerArgument, argumentOffset, len(call.Args))
+			if !validHandler {
+				ix.boundaries = append(ix.boundaries, Boundary{Node: id, Kind: "invalid_rule_site", Reason: "configured handler argument does not exist for " + r.Symbol, Evidence: ix.evidence(call.Pos())})
+			}
+		}
 		if !validArgument {
 			ix.boundaries = append(ix.boundaries, Boundary{Node: id, Kind: "invalid_rule_site", Reason: "configured argument does not exist for " + r.Symbol, Evidence: ix.evidence(call.Pos())})
 			continue
@@ -224,9 +231,7 @@ func (ix *index) applyCallRules(id string, f *function, call *ast.CallExpr, a as
 			key := resourceID("event", r.Namespace, value)
 			ix.resource(id, key, value, "event", r.Kind, call.Pos())
 			if r.HandlerArgument != nil {
-				handlerIndex, validHandler := callRuleArgumentIndex(*r.HandlerArgument, argumentOffset, len(call.Args))
 				if !validHandler {
-					ix.boundaries = append(ix.boundaries, Boundary{Node: id, Kind: "invalid_rule_site", Reason: "configured handler argument does not exist for " + r.Symbol, Evidence: ix.evidence(call.Pos())})
 					continue
 				}
 				expression := call.Args[handlerIndex]
