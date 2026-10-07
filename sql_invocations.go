@@ -2,6 +2,7 @@ package contracttrace
 
 import (
 	"fmt"
+	"go/token"
 	"go/types"
 	"sort"
 
@@ -20,6 +21,15 @@ type sqlInvocation struct {
 	arguments       []ssa.Value
 	unknownReceiver bool
 	apiFunction     bool
+}
+
+// sqlSemanticCall carries the canonical SQL method identity from the SSA call
+// site to the source-oriented SQL inventory pass. The AST call may be a local
+// method value rather than a selector expression.
+type sqlSemanticCall struct {
+	method       *types.Func
+	receiverKind string
+	name         string
 }
 
 func isSQLHandleMethodTarget(target *ssa.Function) (*types.Func, bool) {
@@ -47,6 +57,29 @@ func sqlInvocationSymbol(invocation sqlInvocation) string {
 		return ""
 	}
 	return invocation.method.Pkg().Path() + "::" + functionName(invocation.method)
+}
+
+func (a *flowAnalysis) recordSQLSemanticCall(position token.Pos, invocation sqlInvocation) {
+	if a.sqlCalls == nil {
+		a.sqlCalls = map[token.Pos]map[string]sqlSemanticCall{}
+	}
+	if a.sqlCalls[position] == nil {
+		a.sqlCalls[position] = map[string]sqlSemanticCall{}
+	}
+	key := sqlInvocationSymbol(invocation)
+	if key == "" {
+		return
+	}
+	if _, ok := a.sqlCalls[position][key]; ok {
+		return
+	}
+	if len(a.sqlCalls[position]) >= maxFlowValues {
+		a.coverage.Widened = true
+		return
+	}
+	a.sqlCalls[position][key] = sqlSemanticCall{
+		method: invocation.method, receiverKind: invocation.receiverKind, name: invocation.name,
+	}
 }
 
 // sqlInvocations recognizes the declared database/sql API behind direct calls,

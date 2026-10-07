@@ -96,6 +96,7 @@ type flowAnalysis struct {
 	statementExecutions       map[token.Pos]map[string]flowValue
 	sqlOperations             map[token.Pos]map[string]bool
 	sqlReceivers              map[token.Pos]flowValue
+	sqlCalls                  map[token.Pos]map[string]sqlSemanticCall
 	callbackEscapes           map[ssa.CallInstruction]map[*ssa.Function]bool
 	callbackReturns           map[*ssa.Return]map[*ssa.Function]bool
 	publicGlobals             []*ssa.Global

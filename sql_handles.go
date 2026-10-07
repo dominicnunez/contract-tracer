@@ -269,11 +269,13 @@ func (a *flowAnalysis) sqlHandleUse(call ssa.CallInstruction, ix *index) {
 		position := call.Common().Pos()
 		query := strings.HasPrefix(name, "Exec") || strings.HasPrefix(name, "Query") || strings.HasPrefix(name, "Prepare")
 		if query {
+			a.recordSQLSemanticCall(position, invocation)
 			if a.sqlReceivers == nil {
 				a.sqlReceivers = map[token.Pos]flowValue{}
 			}
 			oldReceiver := a.sqlReceivers[position]
 			a.merge(&oldReceiver, value)
+			oldReceiver.sqlUnknown = oldReceiver.sqlUnknown || invocation.unknownReceiver || unknown
 			a.sqlReceivers[position] = oldReceiver
 			operation := ix.lifecycleSite(call, "sql_operation", receiver+"."+name+" SQL operation")
 			ix.callEdge(ix.owner(call.Parent()), operation, "sql_operation", "fact", call)

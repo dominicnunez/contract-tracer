@@ -306,6 +306,82 @@ func tableHasHole(table string, candidate stringCandidate) bool {
 	}
 	return false
 }
+
+func databaseSQLQueryArgument(name string) (int, bool) {
+	switch name {
+	case "Exec", "Query", "QueryRow", "Prepare":
+		return 0, true
+	case "ExecContext", "QueryContext", "QueryRowContext", "PrepareContext":
+		return 1, true
+	default:
+		return 0, false
+	}
+}
+
+func (ix *index) defaultSQLArguments(call *ast.CallExpr, f *function, config Config) ([]int, bool) {
+	if ix.flow == nil {
+		return nil, false
+	}
+	calls, recognized := ix.flow.sqlCalls[call.Lparen]
+	if !recognized {
+		return nil, false
+	}
+	arguments := map[int]bool{}
+	for _, key := range sortedKeys(calls) {
+		candidate := calls[key]
+		if candidate.receiverKind == "Stmt" || !contains(config.SQLMethods, candidate.name) {
+			continue
+		}
+		argument, ok := databaseSQLQueryArgument(candidate.name)
+		if !ok {
+			continue
+		}
+		argument += callRuleReceiverOffset(call, f, candidate.method)
+		if argument < len(call.Args) {
+			arguments[argument] = true
+		}
+	}
+	result := make([]int, 0, len(arguments))
+	for argument := range arguments {
+		result = append(result, argument)
+	}
+	sort.Ints(result)
+	return result, true
+}
+
+func (ix *index) inventorySQLArgument(owner string, call *ast.CallExpr, f *function, assignments assignments, argument int, config Config) error {
+	if argument < 0 || argument >= len(call.Args) {
+		return nil
+	}
+	namespaces, err := ix.callNamespaces(owner, call, "", config)
+	if err != nil {
+		return err
+	}
+	texts, complete := ix.stringCandidates(call.Args[argument], f, assignments)
+	if !complete {
+		ix.boundaries = append(ix.boundaries, Boundary{Node: owner, Kind: "dynamic_sql", Reason: "query contains unresolved or multiply assigned values; only resolvable table fragments are inventoried", Evidence: ix.evidence(call.Args[argument].Pos())})
+	}
+	tables := []sqlAccess{}
+	queries := make([]string, 0, len(texts))
+	for _, text := range texts {
+		queries = append(queries, text.text)
+		for _, found := range ix.sqlAccesses(owner, text.text, ix.evidence(call.Pos())) {
+			if !tableHasHole(found.access.table, text) {
+				tables = append(tables, found.access)
+			}
+		}
+	}
+	if complete && len(tables) == 0 && !ix.parsedSQL(queries) {
+		ix.boundaries = append(ix.boundaries, Boundary{Node: owner, Kind: "unparsed_sql", Reason: "configured SQL method has no recognized table access; statement or wrapper may be unsupported", Evidence: ix.evidence(call.Pos())})
+	}
+	for _, access := range tables {
+		for _, namespace := range namespaces {
+			ix.sqlTableAccess(owner, resourceID("table", namespace, access.table), access.table, access.role, call)
+		}
+	}
+	return nil
+}
+
 func (ix *index) semantic(c Config) error {
 	ix.databaseOriginBoundaries(c)
 	ix.storage.Dialect = c.SQLDialect
@@ -364,6 +440,15 @@ func (ix *index) semantic(c Config) error {
 					if prepared {
 						break
 					}
+					if arguments, recognized := ix.defaultSQLArguments(v, f, c); recognized {
+						for _, argument := range arguments {
+							if err := ix.inventorySQLArgument(id, v, f, a, argument, c); err != nil {
+								semanticErr = err
+								return false
+							}
+						}
+						break
+					}
 					sel, ok := v.Fun.(*ast.SelectorExpr)
 					if !ok || !contains(c.SQLMethods, sel.Sel.Name) {
 						break
@@ -372,35 +457,9 @@ func (ix *index) semantic(c Config) error {
 					if strings.HasSuffix(sel.Sel.Name, "Context") {
 						arg = 1
 					}
-					if arg >= len(v.Args) {
-						break
-					}
-					namespaces, err := ix.callNamespaces(id, v, "", c)
-					if err != nil {
+					if err := ix.inventorySQLArgument(id, v, f, a, arg, c); err != nil {
 						semanticErr = err
 						return false
-					}
-					texts, complete := ix.stringCandidates(v.Args[arg], f, a)
-					if !complete {
-						ix.boundaries = append(ix.boundaries, Boundary{Node: id, Kind: "dynamic_sql", Reason: "query contains unresolved or multiply assigned values; only resolvable table fragments are inventoried", Evidence: ix.evidence(v.Args[arg].Pos())})
-					}
-					tables := []sqlAccess{}
-					queries := make([]string, 0, len(texts))
-					for _, text := range texts {
-						queries = append(queries, text.text)
-						for _, found := range ix.sqlAccesses(id, text.text, ix.evidence(v.Pos())) {
-							if !tableHasHole(found.access.table, text) {
-								tables = append(tables, found.access)
-							}
-						}
-					}
-					if complete && len(tables) == 0 && !ix.parsedSQL(queries) {
-						ix.boundaries = append(ix.boundaries, Boundary{Node: id, Kind: "unparsed_sql", Reason: "configured SQL method has no recognized table access; statement or wrapper may be unsupported", Evidence: ix.evidence(v.Pos())})
-					}
-					for _, access := range tables {
-						for _, namespace := range namespaces {
-							ix.sqlTableAccess(id, resourceID("table", namespace, access.table), access.table, access.role, v)
-						}
 					}
 				case *ast.CompositeLit:
 					typ := f.pkg.TypesInfo.TypeOf(v)
