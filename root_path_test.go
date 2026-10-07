@@ -60,6 +60,9 @@ func TestTraceKeepsSymlinkParentRootSemantics(t *testing.T) {
 }
 
 func TestCanonicalRootUsesPhysicalBaseForRelativeParent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows resolves junction/.. roots using its native path rules")
+	}
 	base := t.TempDir()
 	actualCWD := filepath.Join(base, "other", "nested", "child")
 	logicalAlias := filepath.Join(base, "app", "alias")
@@ -160,6 +163,9 @@ func TestTraceUsesWindowsJunctionParentResolution(t *testing.T) {
 	if err != nil {
 		t.Skipf("directory junction unavailable: %v: %s", err, output)
 	}
+	if !hasPathReparsePoint(junction) {
+		t.Fatal("Windows directory junction was not recognized as a reparse point")
+	}
 	rawRoot := app + string(os.PathSeparator) + "alias" + string(os.PathSeparator) + ".."
 	rawInfo, err := os.Stat(rawRoot)
 	if err != nil {
@@ -172,16 +178,16 @@ func TestTraceUsesWindowsJunctionParentResolution(t *testing.T) {
 	if !os.SameFile(rawInfo, appInfo) {
 		t.Skip("this Windows version resolves junction/.. differently from the tested parent-directory behavior")
 	}
-	wantRoot, err := filepath.Abs(app)
-	if err != nil {
-		t.Fatal(err)
-	}
 	report, err := Trace(context.Background(), Options{Root: rawRoot, Seeds: []string{"Validate"}, Depth: 2, MaxNodes: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Root != wantRoot {
-		t.Fatalf("Trace selected root %q; OS-resolved module root is %q", report.Root, wantRoot)
+	reportRootInfo, err := os.Stat(report.Root)
+	if err != nil {
+		t.Fatalf("stat report root %q: %v", report.Root, err)
+	}
+	if !os.SameFile(rawInfo, reportRootInfo) {
+		t.Fatalf("Trace selected root %q; it is not the OS-resolved directory for %q", report.Root, rawRoot)
 	}
 	appFound, otherFound := false, false
 	for _, node := range report.Nodes {

@@ -86,7 +86,7 @@ func Trace(ctx context.Context, o Options) (report Report, err error) {
 	}
 	fset := token.NewFileSet()
 	sources := &loadedSourceCapture{}
-	cfg := &packages.Config{Context: ctx, Dir: root, Fset: fset, Tests: o.Tests, Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedDeps | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedModule | packages.NeedEmbedFiles | packages.NeedEmbedPatterns}
+	cfg := &packages.Config{Context: ctx, Dir: root, Env: packageLoaderEnvironment(env), Fset: fset, Tests: o.Tests, Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedDeps | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedModule | packages.NeedEmbedFiles | packages.NeedEmbedPatterns}
 	if o.Tags != "" {
 		cfg.BuildFlags = []string{"-tags=" + o.Tags}
 	}

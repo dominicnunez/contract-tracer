@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -187,6 +188,9 @@ func TestWorkspaceDependencySwitchRejectsSavedAnalysis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if got := saved.Coverage.Build["GOWORK"]; got != work {
+		t.Fatalf("saved build identity rewrote supplied GOWORK: got %q, want %q", got, work)
+	}
 	for _, change := range []struct{ key, value string }{{"GOFLAGS", "-tags=contract_probe"}, {"GOWORK", "off"}} {
 		t.Run(change.key, func(t *testing.T) {
 			t.Setenv(change.key, change.value)
@@ -207,6 +211,58 @@ func TestWorkspaceDependencySwitchRejectsSavedAnalysis(t *testing.T) {
 	_, err = Explore(context.Background(), saved, ExploreOptions{Seeds: []string{"Seed"}, Depth: 1, MaxNodes: 20})
 	if err == nil || !strings.Contains(err.Error(), "changed") {
 		t.Fatalf("workspace dependency switch accepted: %v", err)
+	}
+}
+
+func TestPackageLoaderSkipsWorkspacePathThroughWindowsJunction(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows junction path behavior")
+	}
+	base := t.TempDir()
+	app := filepath.Join(base, "app")
+	other := filepath.Join(base, "other")
+	nested := filepath.Join(other, "nested")
+	for _, dir := range []string{app, nested} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appDependency := filepath.Join(app, "dependency")
+	otherDependency := filepath.Join(other, "dependency")
+	for _, dir := range []string{appDependency, otherDependency} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	junction := filepath.Join(app, "alias")
+	output, err := exec.Command("cmd.exe", "/c", "mklink", "/J", junction, nested).CombinedOutput()
+	if err != nil {
+		t.Skipf("directory junction unavailable: %v: %s", err, output)
+	}
+	if !hasPathReparsePoint(junction) {
+		t.Fatal("Windows directory junction was not recognized as a reparse point")
+	}
+	work := filepath.Join(junction, "go.work")
+	if err := os.WriteFile(filepath.Join(nested, "go.work"), []byte("go 1.27.0\nuse ../dependency\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	useThroughJunction := filepath.Dir(work) + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "dependency"
+	useAfterParentResolution := filepath.Join(nested, "..", "dependency")
+	selected, err := os.Stat(useThroughJunction)
+	if err != nil {
+		t.Skipf("OS cannot resolve the workspace use path through the junction: %v", err)
+	}
+	redirected, err := os.Stat(useAfterParentResolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.SameFile(selected, redirected) {
+		t.Skip("this Windows version resolves the relative workspace use identically after parent resolution")
+	}
+	t.Setenv("GOWORK", work)
+	loaderEnv := packageLoaderEnvironment(map[string]string{"GOWORK": work})
+	if loaderEnv != nil {
+		t.Fatalf("loader environment rewrote GOWORK through a junction parent: %#v", loaderEnv)
 	}
 }
 

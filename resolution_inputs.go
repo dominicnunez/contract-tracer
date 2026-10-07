@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -22,6 +23,47 @@ var featureBuildEnvironmentKeys = []string{
 func buildEnvironmentKeys() []string {
 	keys := append([]string(nil), baseBuildEnvironmentKeys...)
 	return append(keys, featureBuildEnvironmentKeys...)
+}
+
+// packageLoaderEnvironment keeps the workspace directory spelling in the
+// same Windows path namespace as the canonical analysis root. The workfile
+// itself is never resolved through a file symlink, so its relative module
+// paths retain their original base.
+func packageLoaderEnvironment(build map[string]string) []string {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	work := build["GOWORK"]
+	if work == "" || work == "off" {
+		return nil
+	}
+	absolute, err := filepath.Abs(work)
+	if err != nil {
+		return nil
+	}
+	if _, err := os.Lstat(absolute); err != nil || hasPathReparsePoint(filepath.Dir(absolute)) {
+		return nil
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(absolute))
+	if err != nil {
+		return nil
+	}
+	candidate := filepath.Join(parent, filepath.Base(absolute))
+	originalInfo, originalErr := os.Stat(absolute)
+	candidateInfo, candidateErr := os.Stat(candidate)
+	if originalErr != nil || candidateErr != nil || !os.SameFile(originalInfo, candidateInfo) {
+		return nil
+	}
+
+	env := os.Environ()
+	for i, entry := range env {
+		name, _, ok := strings.Cut(entry, "=")
+		if ok && strings.EqualFold(name, "GOWORK") {
+			env[i] = "GOWORK=" + candidate
+			return env
+		}
+	}
+	return append(env, "GOWORK="+candidate)
 }
 
 func captureResolutionInputs(build map[string]string) ([]LoadedSource, error) {

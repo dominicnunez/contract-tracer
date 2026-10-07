@@ -213,19 +213,12 @@ func TestOutputCannotAliasUncreatedSaveThroughDanglingFileSymlink(t *testing.T) 
 func TestOutputCannotAliasSavedAnalysisThroughCleanedRelativePath(t *testing.T) {
 	root := t.TempDir()
 	writeCLIInput(t, root)
+	t.Chdir(root)
 	snapshot := filepath.Join(root, "analysis.json")
-	workingDir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	relative, err := filepath.Rel(workingDir, snapshot)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := os.Mkdir(filepath.Join(filepath.Dir(snapshot), "unused"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	output := filepath.Dir(relative) + string(os.PathSeparator) + "unused" + string(os.PathSeparator) + ".." + string(os.PathSeparator) + filepath.Base(relative)
+	output := "unused" + string(os.PathSeparator) + ".." + string(os.PathSeparator) + filepath.Base(snapshot)
 	result := runCLI(t, "-root", root, "-seed", "Validate", "-save-analysis", snapshot, "-output", output)
 	if result.err == nil {
 		t.Fatal("run accepted output with a cleaned relative path alias")
