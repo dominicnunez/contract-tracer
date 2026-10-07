@@ -86,10 +86,9 @@ func Trace(ctx context.Context, o Options) (report Report, err error) {
 	}
 	fset := token.NewFileSet()
 	sources := &loadedSourceCapture{}
-	cfg := &packages.Config{Context: ctx, Dir: root, Env: packageLoaderEnvironment(env), Fset: fset, Tests: o.Tests, Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedDeps | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedModule | packages.NeedEmbedFiles | packages.NeedEmbedPatterns}
-	if o.Tags != "" {
-		cfg.BuildFlags = []string{"-tags=" + o.Tags}
-	}
+	cfg := packageLoaderConfig(ctx, root, env, o.Tests, o.Tags)
+	cfg.Fset = fset
+	cfg.Mode = packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedDeps | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedModule | packages.NeedEmbedFiles | packages.NeedEmbedPatterns
 	metadataConfig := *cfg
 	metadataConfig.Mode = packages.NeedName | packages.NeedImports | packages.NeedDeps | packages.NeedModule
 	metadata, err := packages.Load(&metadataConfig, "./...")
@@ -118,6 +117,10 @@ func Trace(ctx context.Context, o Options) (report Report, err error) {
 	}
 	if len(pkgs) == 0 {
 		return report, fmt.Errorf("no Go packages loaded")
+	}
+	loadedSources := sources.sources()
+	if err := verifyParserMatchesSelection(pkgs, loadedSources); err != nil {
+		return report, err
 	}
 	loadedResolution, err := captureModuleInputs(pkgs, workspace)
 	if err != nil {
@@ -258,7 +261,7 @@ func Trace(ctx context.Context, o Options) (report Report, err error) {
 	if err != nil {
 		return Report{}, err
 	}
-	report.Coverage.LoadedSources = sources.sources()
+	report.Coverage.LoadedSources = loadedSources
 	report.Coverage.LoadedSourceSHA256 = loadedSourceIdentity(report.Coverage.LoadedSources)
 	report.Coverage.ResolutionInputs = resolution
 	report.Coverage.ResolutionSHA256 = loadedSourceIdentity(resolution)
@@ -277,7 +280,7 @@ func Trace(ctx context.Context, o Options) (report Report, err error) {
 	report.Boundaries = append(report.Boundaries,
 		Boundary{Kind: "semantic_scope", Reason: "The supplied invariant is a hypothesis. This report does not prove it or discover every behavioral relationship."},
 		Boundary{Kind: "analysis_model", Reason: "CHA targets are conservative candidates. References prove use, not invocation. Reflection, unsafe/cgo, runtime dispatch, dependency bodies and unselected build configurations are not fully modeled."},
-		Boundary{Kind: "loaded_source_identity", Reason: "identity includes exact Go bytes presented to the package parser, active workspace and its use-module manifests, effective loaded-module manifests checked around package loading, and recorded Go build/selection environment, checked again before completion; unloaded module directives, checksum files, unrecorded settings, non-Go dependency assets and analyzer implementation remain outside this attestation, and source identity does not imply dependency body analysis"},
+		Boundary{Kind: "loaded_source_identity", Reason: "identity includes exact Go bytes and selected compiled-source paths presented to the package parser, active workspace and its use-module manifests, effective loaded-module manifests checked around package loading, and recorded Go build/selection environment; selected package source paths are rechecked at completion and during saved exploration before final byte hashes, while unloaded module directives, checksum files, unrecorded settings, non-Go dependency assets and analyzer implementation remain outside this attestation, and source identity does not imply dependency body analysis"},
 		Boundary{Kind: "lifecycle", Reason: "Go/defer and configured name hints identify investigation sites; temporal ownership, cancellation propagation and eventual cleanup are not proven."})
 	sortReport(&report)
 	groupBoundaries(&report)
@@ -285,7 +288,7 @@ func Trace(ctx context.Context, o Options) (report Report, err error) {
 	if o.capture != nil {
 		snapshot = ix.snapshot(report)
 	}
-	if err := verifyAnalysisInputs(ctx, root, env, before, ix.assets, ix.assetHash, report.Coverage.LoadedSources, resolution); err != nil {
+	if err := verifyAnalysisInputs(ctx, root, env, before, ix.assets, ix.assetHash, report.Coverage.LoadedSources, resolution, o.Tests, o.Tags); err != nil {
 		return Report{}, err
 	}
 	if o.capture != nil {

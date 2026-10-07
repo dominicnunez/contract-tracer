@@ -58,9 +58,13 @@ func TestExploreRejectsInputsChangedByFinalGoEnv(t *testing.T) {
 				t.Fatalf("read saved analysis: %v", err)
 			}
 
-			marker, countFile := configureIdentityMutator(t, mutator, realGo, fixture.root, mutation, 1)
+			call := 1
+			if mutation.name == "added dependency Go source" {
+				call = 2
+			}
+			marker, countFile := configureIdentityMutator(t, mutator, realGo, fixture.root, mutation, call)
 			report, err := Explore(context.Background(), saved, ExploreOptions{Seeds: []string{"Seed"}, Depth: 2, MaxNodes: 50})
-			assertIdentityMutationRan(t, marker, countFile, 1)
+			assertIdentityMutationRan(t, marker, countFile, call)
 			if err == nil {
 				t.Fatalf("Explore returned a stale graph after final go env changed %s", mutation.name)
 			}
@@ -76,13 +80,14 @@ func TestExploreRejectsInputsChangedByFinalGoEnv(t *testing.T) {
 
 func identityMutations() []identityMutation {
 	return []identityMutation{
-		{name: "root Go source", path: "ignored.go", contents: "\n// changed after identity check\n", wantError: "source changed during analysis"},
+		{name: "root Go source", path: "ignored.go", contents: "//go:build identity_mutator_off\n\npackage app\n\nconst ignored = 2\n", wantError: "source changed during analysis"},
 		{name: "root SQL source", path: "schema.sql", contents: "\n-- changed after identity check\n", wantError: "source changed during analysis"},
-		{name: "root go.mod", path: "go.mod", contents: "\n// changed after identity check\n", wantError: "resolution input check: loaded source changed"},
+		{name: "root go.mod", path: "go.mod", contents: "module example.com/app\n\ngo 1.27.0\n\nrequire example.com/dependency v0.0.0\nreplace example.com/dependency => ../dependency\n\n// changed after identity check\n", wantError: "resolution input check: loaded source changed"},
 		{name: "root go.sum", path: "go.sum", contents: "example.com/unused v1.0.0 h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n", wantError: "source changed during analysis"},
 		{name: "selected embedded asset", path: "asset.txt", contents: "changed asset", wantError: "embedded assets changed during analysis"},
-		{name: "loaded dependency Go source", path: filepath.Join("..", "dependency", "dependency.go"), contents: "\n// changed after identity check\n", wantError: "loaded source changed"},
-		{name: "dependency resolution manifest", path: filepath.Join("..", "dependency", "go.mod"), contents: "\n// changed after identity check\n", wantError: "resolution input check: loaded source changed"},
+		{name: "loaded dependency Go source", path: filepath.Join("..", "dependency", "dependency.go"), contents: "package dependency\nfunc Marker() int { return 2 }\n", wantError: "loaded source changed"},
+		{name: "added dependency Go source", path: filepath.Join("..", "dependency", "added.go"), contents: "package dependency\nfunc Added() int { return 2 }\n", wantError: "selected Go source set changed"},
+		{name: "dependency resolution manifest", path: filepath.Join("..", "dependency", "go.mod"), contents: "module example.com/dependency\n\ngo 1.27.0\n\n// changed after identity check\n", wantError: "resolution input check: loaded source changed"},
 	}
 }
 

@@ -101,6 +101,9 @@ func Explore(ctx context.Context, a Analysis, o ExploreOptions) (Report, error) 
 	if err := a.validate(); err != nil {
 		return Report{}, err
 	}
+	if len(a.Coverage.LoadedSources) == 0 {
+		return Report{}, fmt.Errorf("saved analysis lacks the selected Go source inventory required for safe exploration; rerun analysis")
+	}
 	if len(o.Seeds) == 0 && len(o.Locations) == 0 {
 		return Report{}, fmt.Errorf("at least one symbol or source-location seed is required")
 	}
@@ -172,10 +175,7 @@ func Explore(ctx context.Context, a Analysis, o ExploreOptions) (Report, error) 
 	if report.Invariant == "" {
 		report.Invariant = a.Invariant
 	}
-	report.Boundaries = append(report.Boundaries, Boundary{Kind: "saved_analysis", Reason: "Explored a saved graph after checking target Go/SQL/module, selected embedded bytes and any captured loaded Go sources. Dependency analysis and unmodeled relationships were not refreshed; original analysis boundaries remain."})
-	if len(a.Coverage.LoadedSources) == 0 {
-		report.Boundaries = append(report.Boundaries, Boundary{Kind: "legacy_loaded_source_identity", Reason: "this snapshot predates loaded-source capture; dependency and generated Go source edits are not checked, so rerun analysis for their source identity"})
-	}
+	report.Boundaries = append(report.Boundaries, Boundary{Kind: "saved_analysis", Reason: "Explored a saved graph after checking target Go/SQL/module inputs, selected embedded bytes, current selected package source paths against the captured parser inputs, and loaded Go source hashes. Dependency analysis and unmodeled relationships were not refreshed; original analysis boundaries remain."})
 	if _, captured := a.Coverage.Build["GOWORK"]; !captured {
 		report.Boundaries = append(report.Boundaries, Boundary{Kind: "legacy_resolution_identity", Reason: "this snapshot predates workspace and GOFLAGS capture; workspace selection and those settings are not checked, so rerun analysis for their identity"})
 	}
@@ -186,7 +186,7 @@ func Explore(ctx context.Context, a Analysis, o ExploreOptions) (Report, error) 
 		report.Boundaries = append(report.Boundaries, Boundary{Kind: "legacy_dependency_module_identity", Reason: "this snapshot predates effective dependency module manifest capture; external dependency module directives are not checked, so rerun analysis for their identity"})
 	}
 	groupBoundaries(&report)
-	if err := verifyAnalysisInputs(ctx, root, a.Coverage.Build, before, a.Coverage.EmbeddedFiles, assets, a.Coverage.LoadedSources, a.Coverage.ResolutionInputs); err != nil {
+	if err := verifyAnalysisInputs(ctx, root, a.Coverage.Build, before, a.Coverage.EmbeddedFiles, assets, a.Coverage.LoadedSources, a.Coverage.ResolutionInputs, a.Coverage.Tests, a.Coverage.Tags); err != nil {
 		return Report{}, err
 	}
 	return report, nil

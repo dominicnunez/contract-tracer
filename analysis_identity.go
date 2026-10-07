@@ -5,11 +5,14 @@ import (
 	"fmt"
 )
 
-// verifyAnalysisInputs checks the Go environment before rereading every file
-// identity component. The go command is an external process, so input reads
-// must follow it at the analysis completion boundary.
-func verifyAnalysisInputs(ctx context.Context, root string, build map[string]string, sourceHash string, assets []string, assetHash string, loaded, resolution []LoadedSource) error {
+// verifyAnalysisInputs checks the Go environment and selected package sources
+// before rereading every file identity component. Go commands are external
+// processes, so final input reads must follow them at completion.
+func verifyAnalysisInputs(ctx context.Context, root string, build map[string]string, sourceHash string, assets []string, assetHash string, loaded, resolution []LoadedSource, tests bool, tags string) error {
 	if err := verifyBuildEnvironment(ctx, root, build); err != nil {
+		return err
+	}
+	if err := verifySelectedPackageSources(ctx, root, build, tests, tags, loaded); err != nil {
 		return err
 	}
 

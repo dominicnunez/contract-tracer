@@ -191,6 +191,15 @@ func TestWorkspaceDependencySwitchRejectsSavedAnalysis(t *testing.T) {
 	if got := saved.Coverage.Build["GOWORK"]; got != work {
 		t.Fatalf("saved build identity rewrote supplied GOWORK: got %q, want %q", got, work)
 	}
+	if _, err := Explore(context.Background(), saved, ExploreOptions{Seeds: []string{"Seed"}, Depth: 1, MaxNodes: 20}); err != nil {
+		t.Fatalf("stable workspace analysis did not explore: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "first", "added.go"), []byte("package dependency\nconst Added = 2\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Explore(context.Background(), saved, ExploreOptions{Seeds: []string{"Seed"}, Depth: 1, MaxNodes: 20}); err == nil || !strings.Contains(err.Error(), "selected Go source set changed") {
+		t.Fatalf("saved workspace analysis accepted newly selected dependency source: %v", err)
+	}
 	for _, change := range []struct{ key, value string }{{"GOFLAGS", "-tags=contract_probe"}, {"GOWORK", "off"}} {
 		t.Run(change.key, func(t *testing.T) {
 			t.Setenv(change.key, change.value)
