@@ -442,18 +442,17 @@ func fingerprint(root string) (string, []string, error) {
 			return err
 		}
 		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "vendor", ".gograph":
+			if isFingerprintExcludedDirectory(d.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		isSQL := strings.HasSuffix(strings.ToLower(path), ".sql")
+		isSQL := strings.HasSuffix(strings.ToLower(d.Name()), ".sql")
 		if isSQL && d.Type()&os.ModeSymlink != 0 {
 			rel, _ := relative(root, path)
 			return fmt.Errorf("SQL file symlinks are not supported: %s", rel)
 		}
-		if strings.HasSuffix(path, ".go") || isSQL || d.Name() == "go.mod" || d.Name() == "go.sum" {
+		if isFingerprintInputName(d.Name()) {
 			rel, _ := relative(root, path)
 			files = append(files, rel)
 		}
@@ -474,6 +473,89 @@ func fingerprint(root string) (string, []string, error) {
 	}
 	return hex.EncodeToString(h.Sum(nil)), files, nil
 }
+
+func isFingerprintExcludedDirectory(name string) bool {
+	switch name {
+	case ".git", "vendor", ".gograph":
+		return true
+	default:
+		return false
+	}
+}
+
+func isFingerprintInputName(name string) bool {
+	return strings.HasSuffix(name, ".go") || strings.HasSuffix(strings.ToLower(name), ".sql") || name == "go.mod" || name == "go.sum"
+}
+
+// IsFingerprintInputPath reports whether writing path would create a file
+// included in root's source fingerprint or replace a path alias to one. It
+// compares filesystem identities rather than lexically cleaning paths.
+func IsFingerprintInputPath(root, path string) (bool, error) {
+	root, err := canonicalRoot(root)
+	if err != nil {
+		return false, err
+	}
+	var destinationInfo os.FileInfo
+	if info, statErr := os.Stat(path); statErr == nil {
+		destinationInfo = info
+	} else if !os.IsNotExist(statErr) {
+		return false, fmt.Errorf("inspect destination %q: %w", path, statErr)
+	} else if info, lstatErr := os.Lstat(path); lstatErr == nil && info.Mode()&os.ModeSymlink != 0 {
+		return false, fmt.Errorf("destination %q is a dangling or unresolvable symbolic link", path)
+	} else if lstatErr != nil && !os.IsNotExist(lstatErr) {
+		return false, fmt.Errorf("inspect destination %q: %w", path, lstatErr)
+	}
+	prospectiveInput := false
+	var parentInfo os.FileInfo
+	if isFingerprintInputName(filepath.Base(path)) {
+		directory, _ := filepath.Split(path)
+		if directory == "" {
+			directory = "."
+		}
+		parentInfo, err = os.Stat(directory)
+		if err != nil {
+			return false, fmt.Errorf("inspect destination directory for %q: %w", path, err)
+		}
+		if !parentInfo.IsDir() {
+			return false, fmt.Errorf("destination parent for %q is not a directory", path)
+		}
+	}
+	aliasedInput := false
+	err = filepath.WalkDir(root, func(current string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if isFingerprintExcludedDirectory(entry.Name()) {
+				return filepath.SkipDir
+			}
+			if parentInfo != nil {
+				info, err := entry.Info()
+				if err != nil {
+					return err
+				}
+				if os.SameFile(parentInfo, info) {
+					prospectiveInput = true
+					return filepath.SkipAll
+				}
+			}
+			return nil
+		}
+		if destinationInfo != nil && isFingerprintInputName(entry.Name()) {
+			inputInfo, err := os.Stat(current)
+			if err != nil {
+				return err
+			}
+			if os.SameFile(destinationInfo, inputInfo) {
+				aliasedInput = true
+				return filepath.SkipAll
+			}
+		}
+		return nil
+	})
+	return prospectiveInput || aliasedInput, err
+}
+
 func buildEnvironment(ctx context.Context, root string) (map[string]string, error) {
 	keys := buildEnvironmentKeys()
 	args := append([]string{"env", "-json"}, keys...)

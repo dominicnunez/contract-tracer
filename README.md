@@ -43,7 +43,9 @@ On Windows, run `.\contract-trace.exe` from PowerShell. Seeds may be function na
 
 Important options include `-tests`, `-tags`, `-expand-callbacks`, `-timeout`, `-format json|markdown`, `-save-analysis file.json.gz`, and `-resume file.json.gz`. The default traversal limits are depth 3 and 250 nodes. Reports retain truncation, frontiers, candidate inventories and unresolved boundaries when analysis is bounded. Saved exploration reuses the discovered graph after checking source and build identities; it does not rerun analysis to recover omitted relationships.
 
-On Windows, when `-output` is combined with `-save-analysis` or `-resume`, both paths must use ordinary file names without a trailing dot, trailing space or colon. These forms can alias another file or select an alternate data stream.
+On Windows, `-save-analysis` destinations and any `-output` paired with `-save-analysis` or `-resume` must use ordinary file names without a trailing dot, trailing space or colon. These forms can alias another file or select an alternate data stream.
+
+When saving or resuming an analysis, the snapshot destination and any paired `-output` destination must not replace a captured input or add a fingerprinted source file under the analyzed root. This covers root Go and SQL files, `go.mod` and `go.sum`, captured embedded assets, loaded Go sources and module-resolution inputs. JSON or gzip snapshots and reports may be placed inside the root unless their paths alias captured inputs. The check uses the filesystem state at publication time and assumes the analyzed files and directory layout remain stable while the command runs; it is not a concurrent filesystem-write lock.
 
 ## Configuration
 

@@ -109,10 +109,20 @@ func run() int {
 			fmt.Fprintln(os.Stderr, "saved analysis:", readErr)
 			return 1
 		}
+		if err := rejectAnalysisInputWrites(analysis, analysisArtifactPath{flag: "output", path: *output}); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
 		r, err = trace.Explore(ctx, analysis, trace.ExploreOptions{Seeds: symbols, Locations: positions, Focus: focusAnchors, Invariant: *invariant, Depth: *depth, MaxNodes: *budget, ExpandCallbacks: *expandCallbacks})
 	} else if *saveAnalysis != "" {
 		var analysis trace.Analysis
 		r, analysis, err = trace.TraceWithAnalysis(ctx, options)
+		if err == nil {
+			err = rejectAnalysisInputWrites(analysis,
+				analysisArtifactPath{flag: "save-analysis", path: *saveAnalysis},
+				analysisArtifactPath{flag: "output", path: *output},
+			)
+		}
 		if err == nil {
 			err = saveSnapshot(*saveAnalysis, analysis)
 		}
@@ -148,7 +158,11 @@ func run() int {
 }
 
 func saveSnapshot(destination string, analysis trace.Analysis) error {
-	file, err := os.CreateTemp(filepath.Dir(destination), ".contract-analysis-*")
+	directory, _ := filepath.Split(destination)
+	if directory == "" {
+		directory = "."
+	}
+	file, err := os.CreateTemp(directory, ".contract-analysis-*")
 	if err != nil {
 		return err
 	}
