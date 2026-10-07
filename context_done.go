@@ -174,6 +174,9 @@ func (a *flowAnalysis) modelDone(call *ssa.Call, ix *index) {
 			continue
 		}
 		resolved = true
+		if site.unknown {
+			result.interfaceUnknown = true
+		}
 		if site.needsCancel {
 			channel := resourceID("channel", "context_done", key)
 			value := emptyFlow()
@@ -202,8 +205,12 @@ func (a *flowAnalysis) modelDone(call *ssa.Call, ix *index) {
 			}
 		}
 		if hasWithValue {
-			parentFlow := a.get(site.parent)
-			if parentFlow.interfaceUnknown || parentFlow.sqlUnknown || len(parentFlow.addresses) == 0 {
+			parents := site.parents["WithValue"]
+			parentFlow := emptyFlow()
+			for _, parent := range sortedSSAValues(parents) {
+				a.merge(&parentFlow, a.get(parent))
+			}
+			if site.parentUnknown || site.unknown || parentFlow.interfaceUnknown || parentFlow.sqlUnknown || parentFlow.boundReceiverUnknown || len(parentFlow.addresses) == 0 {
 				result.interfaceUnknown = true
 			}
 			for _, parent := range sortedKeys(parentFlow.addresses) {

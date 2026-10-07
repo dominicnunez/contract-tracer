@@ -65,7 +65,22 @@ func (a *flowAnalysis) afterFuncSchedulerFlow() bool {
 	}
 	for _, key := range sortedKeys(a.contextKeys) {
 		site := a.contextKeys[key]
-		if site.needsCancel && site.parent != nil && a.bindCancellationScheduler(a.get(site.parent), "cancel:"+key) {
+		if !site.needsCancel {
+			continue
+		}
+		parent := emptyFlow()
+		for _, name := range site.names {
+			if contextConstructorClass(name) != "cancelable" {
+				continue
+			}
+			for _, value := range sortedSSAValues(site.parents[name]) {
+				a.merge(&parent, a.get(value))
+			}
+		}
+		if site.parentUnknown || site.unknown {
+			parent.interfaceUnknown = true
+		}
+		if a.bindCancellationScheduler(parent, "cancel:"+key) {
 			changed = true
 		}
 	}

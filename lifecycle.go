@@ -16,6 +16,9 @@ type contextSite struct {
 	certainty        string
 	needsCancel      bool
 	parent           ssa.Value
+	parents          map[string]map[ssa.Value]bool
+	parentUnknown    bool
+	unknown          bool
 }
 
 func (a *flowAnalysis) modelContext(call ssa.CallInstruction, ix *index) bool {
@@ -84,11 +87,16 @@ func (a *flowAnalysis) modelContext(call ssa.CallInstruction, ix *index) bool {
 		certainty = "possible"
 	}
 	site := contextSite{key: key, owner: ix.owner(call.Parent()), name: name, names: names, position: call.Pos(), certainty: certainty, needsCancel: needsCancel}
-	if name != "Background" && name != "TODO" && len(call.Common().Args) > 0 {
+	needsParent := false
+	for _, candidate := range names {
+		needsParent = needsParent || candidate != "Background" && candidate != "TODO"
+	}
+	if needsParent && len(call.Common().Args) > 0 {
 		site.parent = call.Common().Args[0]
 	}
+	site.unknown = contextValue.interfaceUnknown
 	a.contexts[call] = site
-	a.contextKeys[key] = site
+	changed = a.mergeContextSite(site) || changed
 	if direct, ok := call.(*ssa.Call); ok {
 		if a.special == nil {
 			a.special = map[*ssa.Call][]flowValue{}
@@ -99,6 +107,90 @@ func (a *flowAnalysis) modelContext(call ssa.CallInstruction, ix *index) bool {
 		ix.funcs[key] = &function{node: Node{ID: key, Name: "context at " + evidence.File + fmt.Sprintf(":%d:%d", evidence.Line, evidence.Column), Kind: "context", Evidence: evidence}}
 	}
 	return changed
+}
+
+// mergeContextSite keeps the candidates for one source creation site when Go
+// generic instantiations have separate SSA call instructions at the same
+// position. Parent values stay as SSA identities and are resolved with get at
+// each use, so later flow growth is visible. The per-call contexts map remains
+// separate for source-owner and cancellation reporting.
+func (a *flowAnalysis) mergeContextSite(site contextSite) bool {
+	current, exists := a.contextKeys[site.key]
+	changed := false
+	if !exists {
+		current = contextSite{
+			key: site.key, owner: site.owner, position: site.position,
+			certainty: site.certainty, parents: map[string]map[ssa.Value]bool{},
+		}
+		changed = true
+	}
+	if site.owner != "" && (current.owner == "" || site.owner < current.owner) {
+		current.owner = site.owner
+		changed = true
+	}
+	if current.name == "" || site.name != "" && site.name < current.name {
+		current.name = site.name
+		changed = true
+	}
+	nameSet := make(map[string]bool, len(current.names)+len(site.names))
+	for _, name := range current.names {
+		nameSet[name] = true
+	}
+	for _, name := range site.names {
+		if !nameSet[name] {
+			nameSet[name] = true
+			changed = true
+		}
+	}
+	current.names = sortedKeys(nameSet)
+	if site.needsCancel && !current.needsCancel {
+		current.needsCancel = true
+		changed = true
+	}
+	if site.unknown && !current.unknown {
+		current.unknown = true
+		changed = true
+	}
+	if site.parentUnknown && !current.parentUnknown {
+		current.parentUnknown = true
+		changed = true
+	}
+	if site.parent != nil {
+		for _, name := range site.names {
+			if name == "Background" || name == "TODO" {
+				continue
+			}
+			parents := current.parents[name]
+			if parents[site.parent] {
+				continue
+			}
+			if len(parents) >= maxFlowValues {
+				if !current.parentUnknown {
+					current.parentUnknown = true
+					changed = true
+				}
+				a.coverage.Widened = true
+				continue
+			}
+			if parents == nil {
+				parents = map[ssa.Value]bool{}
+				current.parents[name] = parents
+			}
+			parents[site.parent] = true
+			changed = true
+		}
+	}
+	a.contextKeys[site.key] = current
+	return changed
+}
+
+func contextHasName(site contextSite, name string) bool {
+	for _, candidate := range site.names {
+		if candidate == name {
+			return true
+		}
+	}
+	return site.name == name
 }
 
 func contextConstructorName(target *ssa.Function) string {
@@ -194,8 +286,13 @@ func (a *flowAnalysis) contextBoundaries(ix *index) {
 		}
 	}
 	for _, site := range a.contexts {
+		summary := a.contextKeys[site.key]
 		if site.needsCancel && site.parent != nil {
-			a.cancellationSchedulerRelationships(site.key, a.get(site.parent), ix.evidence(site.position), "context_cancellation_scheduler", "context_scheduler_stop_target", ix)
+			parent := a.get(site.parent)
+			if summary.parentUnknown || summary.unknown {
+				parent.interfaceUnknown = true
+			}
+			a.cancellationSchedulerRelationships(site.key, parent, ix.evidence(site.position), "context_cancellation_scheduler", "context_scheduler_stop_target", ix)
 		}
 		ix.edge(site.owner, site.key, "context_create", site.certainty, site.position)
 		if site.name == "WithoutCancel" {
@@ -206,7 +303,8 @@ func (a *flowAnalysis) contextBoundaries(ix *index) {
 		}
 		if site.parent != nil {
 			parentKnown := false
-			for parent := range a.get(site.parent).addresses {
+			parentFlow := a.get(site.parent)
+			for parent := range parentFlow.addresses {
 				if _, modeled := a.contextKeys[parent]; modeled {
 					ix.edge(site.key, parent, "context_parent", "possible", site.position)
 					if site.name != "WithoutCancel" {
@@ -215,9 +313,15 @@ func (a *flowAnalysis) contextBoundaries(ix *index) {
 					parentKnown = true
 				}
 			}
-			if !parentKnown {
-				ix.boundaries = append(ix.boundaries, Boundary{Node: site.owner, Kind: "context_parent", Reason: "parent context creation is outside the modeled flow", Evidence: ix.evidence(site.position)})
+			if !parentKnown || parentFlow.interfaceUnknown || parentFlow.sqlUnknown || parentFlow.boundReceiverUnknown || summary.parentUnknown || summary.unknown {
+				reason := "parent context creation is outside the modeled flow"
+				if parentKnown {
+					reason = "known parent context candidates coexist with unresolved or widened parent alternatives"
+				}
+				ix.boundaries = append(ix.boundaries, Boundary{Node: site.owner, Kind: "context_parent", Reason: reason, Evidence: ix.evidence(site.position)})
 			}
+		} else if summary.parentUnknown {
+			ix.boundaries = append(ix.boundaries, Boundary{Node: site.owner, Kind: "context_parent", Reason: "bounded parent candidates omit additional context origins", Evidence: ix.evidence(site.position)})
 		}
 	}
 }

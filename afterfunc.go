@@ -108,7 +108,7 @@ func (a *flowAnalysis) afterFuncRelationships(ix *index) {
 			}
 			known = true
 			ix.edges = append(ix.edges, Relationship{From: key, To: context, Kind: "cancellation_callback_context", Certainty: "possible", Evidence: evidence})
-			if creation.name == "Background" || creation.name == "TODO" || creation.name == "WithoutCancel" {
+			if contextHasName(creation, "Background") || contextHasName(creation, "TODO") || contextHasName(creation, "WithoutCancel") {
 				ix.boundaries = append(ix.boundaries, Boundary{Node: key, Kind: "noncanceling_callback_context", Reason: "registration has a known context candidate with no cancellation signal; this candidate does not inherit parent cancellation, while other aliases or runtime values may remain possible", Evidence: evidence})
 			}
 		}
