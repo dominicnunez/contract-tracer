@@ -390,6 +390,16 @@ func (ix *index) semantic(c Config) error {
 							})
 						}
 					}
+				case *ast.RangeStmt:
+					for _, lhs := range []ast.Expr{v.Key, v.Value} {
+						if lhs != nil && contains(c.EventFields, field(lhs)) {
+							ix.boundaries = append(ix.boundaries, Boundary{
+								Node: id, Kind: "dynamic_event",
+								Reason:   "configured event field receives a range iteration key or value; the collection candidate is unresolved",
+								Evidence: ix.evidence(v.Pos()),
+							})
+						}
+					}
 				case *ast.BinaryExpr:
 					if v.Op == token.EQL || v.Op == token.NEQ {
 						if contains(c.EventFields, field(v.X)) {
