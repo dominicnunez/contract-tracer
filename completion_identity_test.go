@@ -140,7 +140,7 @@ func buildIdentityMutator(t *testing.T) (string, string) {
 		name += ".exe"
 	}
 	mutator := filepath.Join(outputDir, name)
-	command := exec.Command(realGo, "build", "-o", mutator, "./testdata/go-env-mutator")
+	command := exec.Command(realGo, "build", "-buildvcs=false", "-o", mutator, "./testdata/go-env-mutator")
 	command.Dir = root
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("build local go env mutator: %v\n%s", err, output)
