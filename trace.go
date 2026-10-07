@@ -294,15 +294,37 @@ func Trace(ctx context.Context, o Options) (report Report, err error) {
 }
 
 func canonicalRoot(root string) (string, error) {
-	absolute, err := filepath.Abs(root)
+	path := root
+	if !filepath.IsAbs(root) {
+		if len(root) > 0 && os.IsPathSeparator(root[0]) {
+			return "", fmt.Errorf("root %q is rooted without a volume; use an absolute path", root)
+		}
+		if filepath.VolumeName(root) != "" {
+			return "", fmt.Errorf("drive-relative root %q is unsupported; use an absolute path", root)
+		}
+		workingDirectory, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		workingDirectory, err = filepath.EvalSymlinks(workingDirectory)
+		if err != nil {
+			return "", err
+		}
+		if !strings.HasSuffix(workingDirectory, string(filepath.Separator)) {
+			workingDirectory += string(filepath.Separator)
+		}
+		path = workingDirectory + root
+	}
+	// Resolve raw path components before Abs cleans any symlink/.. sequence.
+	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return "", err
 	}
-	resolved, err := filepath.EvalSymlinks(absolute)
+	absolute, err := filepath.Abs(resolved)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Clean(resolved), nil
+	return filepath.Clean(absolute), nil
 }
 
 func functionName(obj *types.Func) string {

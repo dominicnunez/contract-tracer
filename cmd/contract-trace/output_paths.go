@@ -23,69 +23,71 @@ func rejectOutputSnapshotAlias(output, snapshot, snapshotFlag string) error {
 }
 
 func pathsAlias(first, second string) (bool, error) {
-	firstPath, firstInfo, firstExists, err := canonicalProspectivePath(first)
+	firstPath, err := inspectOutputPath(first)
 	if err != nil {
 		return false, err
 	}
-	secondPath, secondInfo, secondExists, err := canonicalProspectivePath(second)
+	secondPath, err := inspectOutputPath(second)
 	if err != nil {
 		return false, err
 	}
-	if firstExists && secondExists && os.SameFile(firstInfo, secondInfo) {
-		return true, nil
+	if firstPath.exists && secondPath.exists {
+		return os.SameFile(firstPath.file, secondPath.file), nil
 	}
-	if firstExists && secondExists {
+	if firstPath.exists || secondPath.exists {
 		return false, nil
 	}
-	if firstPath == secondPath {
+	if !os.SameFile(firstPath.parent, secondPath.parent) {
+		return false, nil
+	}
+	if firstPath.leaf == secondPath.leaf {
 		return true, nil
 	}
-	if runtime.GOOS == "windows" && strings.EqualFold(firstPath, secondPath) {
+	if runtime.GOOS == "windows" && strings.EqualFold(firstPath.leaf, secondPath.leaf) {
 		return true, nil
 	}
 	return false, nil
 }
 
-// canonicalProspectivePath resolves existing symlinked ancestors even when
-// the final file has not been created yet. The caller relies on a stable
-// filesystem namespace while it preflights and writes the selected paths.
-func canonicalProspectivePath(path string) (string, os.FileInfo, bool, error) {
-	abs, err := filepath.Abs(path)
+type outputPathIdentity struct {
+	file   os.FileInfo
+	parent os.FileInfo
+	leaf   string
+	exists bool
+}
+
+// inspectOutputPath lets the operating system resolve the original path,
+// including symlink/.. components. A missing leaf is identified by its
+// existing parent directory and leaf name; missing parents cannot be written
+// by the current output and snapshot writers, so those paths fail closed.
+func inspectOutputPath(path string) (outputPathIdentity, error) {
+	if info, err := os.Stat(path); err == nil {
+		return outputPathIdentity{file: info, exists: true}, nil
+	} else if !os.IsNotExist(err) {
+		return outputPathIdentity{}, err
+	}
+
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return outputPathIdentity{}, fmt.Errorf("%q is a dangling or unresolvable symbolic link", path)
+		}
+	} else if !os.IsNotExist(err) {
+		return outputPathIdentity{}, err
+	}
+
+	directory, leaf := filepath.Split(path)
+	if leaf == "" {
+		return outputPathIdentity{}, fmt.Errorf("%q has no file name", path)
+	}
+	if directory == "" {
+		directory = "."
+	}
+	parent, err := os.Stat(directory)
 	if err != nil {
-		return "", nil, false, err
+		return outputPathIdentity{}, fmt.Errorf("resolve parent of %q: %w", path, err)
 	}
-	abs = filepath.Clean(abs)
-	if info, statErr := os.Stat(abs); statErr == nil {
-		resolved, resolveErr := filepath.EvalSymlinks(abs)
-		if resolveErr != nil {
-			return "", nil, false, resolveErr
-		}
-		return filepath.Clean(resolved), info, true, nil
-	} else if !os.IsNotExist(statErr) {
-		return "", nil, false, statErr
+	if !parent.IsDir() {
+		return outputPathIdentity{}, fmt.Errorf("parent of %q is not a directory", path)
 	}
-
-	current := abs
-	var suffix []string
-	for {
-		if _, lstatErr := os.Lstat(current); lstatErr == nil {
-			resolved, resolveErr := filepath.EvalSymlinks(current)
-			if resolveErr != nil {
-				return "", nil, false, resolveErr
-			}
-			for i := len(suffix) - 1; i >= 0; i-- {
-				resolved = filepath.Join(resolved, suffix[i])
-			}
-			return filepath.Clean(resolved), nil, false, nil
-		} else if !os.IsNotExist(lstatErr) {
-			return "", nil, false, lstatErr
-		}
-
-		parent := filepath.Dir(current)
-		if parent == current {
-			return "", nil, false, fmt.Errorf("no existing ancestor for %q", path)
-		}
-		suffix = append(suffix, filepath.Base(current))
-		current = parent
-	}
+	return outputPathIdentity{parent: parent, leaf: leaf}, nil
 }

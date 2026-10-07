@@ -113,6 +113,63 @@ func TestOutputCannotReplaceSymlinkedSavedAnalysis(t *testing.T) {
 	}
 }
 
+func TestOutputCannotReplaceAnalysisViaSymlinkParentTraversal(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "app")
+	other := filepath.Join(base, "other")
+	if err := os.MkdirAll(root, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(other, "nested"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeCLIInput(t, root)
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(filepath.Join(other, "nested"), alias); err != nil {
+		t.Skipf("directory symlinks unavailable: %v", err)
+	}
+	snapshot := filepath.Join(other, "analysis.json")
+	created := runCLI(t, "-root", root, "-seed", "Validate", "-save-analysis", snapshot)
+	if created.err != nil {
+		t.Fatalf("create valid saved analysis: %v: %s", created.err, created.stderr)
+	}
+	original, err := os.ReadFile(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := root + string(os.PathSeparator) + "alias" + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "analysis.json"
+	outputInfo, err := os.Stat(output)
+	if err != nil {
+		t.Skipf("this platform does not resolve symlink/.. to the target's parent: %v", err)
+	}
+	snapshotInfo, err := os.Stat(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(outputInfo, snapshotInfo) {
+		t.Skip("this platform resolves symlink/.. differently from the POSIX alias under test")
+	}
+
+	result := runCLI(t, "-resume", snapshot, "-seed", "Validate", "-output", output)
+	if result.err == nil {
+		t.Fatal("run accepted output that reaches the resumed analysis through symlink/.. traversal")
+	}
+	after, err := os.ReadFile(snapshot)
+	if err != nil || string(after) != string(original) {
+		t.Fatalf("rejected symlink traversal changed snapshot: read err=%v", err)
+	}
+
+	freshSnapshot := filepath.Join(other, "fresh-analysis.json")
+	freshOutput := root + string(os.PathSeparator) + "alias" + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "fresh-analysis.json"
+	fresh := runCLI(t, "-root", root, "-seed", "Validate", "-save-analysis", freshSnapshot, "-output", freshOutput)
+	if fresh.err == nil {
+		t.Fatal("run accepted fresh output that reaches the new snapshot through symlink/.. traversal")
+	}
+	if _, err := os.Stat(freshSnapshot); !os.IsNotExist(err) {
+		t.Fatalf("fresh symlink traversal should be rejected before snapshot creation, stat error=%v", err)
+	}
+}
+
 func TestOutputCannotAliasUncreatedSaveThroughDirectorySymlink(t *testing.T) {
 	root := t.TempDir()
 	writeCLIInput(t, root)
