@@ -34,13 +34,15 @@ func (a *flowAnalysis) modelWaitGroupBinding(closure *ssa.MakeClosure, result *f
 					continue
 				}
 				value := emptyFlow()
-				aliases := a.get(closure.Bindings[index]).addresses
+				receiverFlow := a.get(closure.Bindings[index])
+				aliases := receiverFlow.addresses
 				if interfaceReceiver {
 					known, tagged := a.waitGroupInterfaceAliases(closure.Bindings[index])
 					if !known {
 						continue
 					}
 					aliases = tagged
+					value.interfaceUnknown = receiverFlow.interfaceUnknown || a.waitGroupInputCandidate(receiverFlow.addresses)
 				}
 				value.effects["waitgroup_bound:"+name] = true
 				for _, alias := range sortedKeys(aliases) {
@@ -76,11 +78,16 @@ func (a *flowAnalysis) waitGroupUses(common *ssa.CallCommon) []waitGroupUse {
 		}
 		arguments = common.Args[1:]
 	} else if common.IsInvoke() && waitGroupMethodName(common.Method.Name()) {
+		receiver := a.get(common.Value)
 		if known, tagged := a.waitGroupInterfaceAliases(common.Value); known {
 			aliases[common.Method.Name()] = tagged
+			outside := receiver.interfaceUnknown || a.waitGroupInputCandidate(receiver.addresses)
+			partialOperations[common.Method.Name()] = outside
+			outsideOperations[common.Method.Name()] = outside
 		}
 	} else {
-		for _, effect := range sortedKeys(a.get(common.Value).effects) {
+		callable := a.get(common.Value)
+		for _, effect := range sortedKeys(callable.effects) {
 			if !strings.HasPrefix(effect, "waitgroup_bound:") {
 				continue
 			}
@@ -92,6 +99,9 @@ func (a *flowAnalysis) waitGroupUses(common *ssa.CallCommon) []waitGroupUse {
 			if len(parts) == 2 {
 				aliases[name][parts[1]] = true
 			}
+			outside := callable.interfaceUnknown || a.waitGroupInputCandidate(callable.addresses)
+			partialOperations[name] = partialOperations[name] || outside
+			outsideOperations[name] = outsideOperations[name] || outside
 		}
 	}
 	uses := []waitGroupUse{}
