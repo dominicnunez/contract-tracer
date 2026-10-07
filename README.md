@@ -49,7 +49,7 @@ On Windows, when `-output` is combined with `-save-analysis` or `-resume`, both 
 
 `-config config.json` accepts one strict JSON object. Unknown fields, invalid selectors and unsupported rule kinds are errors. Omitted fields keep defaults; explicitly setting an array to `[]` disables that default list. Call and lifecycle symbols use `<Go import path>::<declared function or method>`. A storage scope's `database_origins` may also use `<Go import path>::(package init)` for a database constructor declared in a package-level variable initializer.
 
-Each `-root` selects one Go module tree. On Windows, use a fully qualified absolute path or an ordinary path relative to the current directory; drive-relative forms such as `C:src` and current-drive-rooted forms such as `\src` are rejected, so use a drive-qualified absolute path instead. SQL inventory stops at a nested directory containing another `go.mod`, even if a configured `sql_files` glob matches files below it. Analyze a nested module separately by selecting its directory as `-root`.
+Each `-root` selects one Go module tree. SQL inventory stops at a nested directory containing another `go.mod`, even if a configured `sql_files` glob matches files below it. Analyze a nested module separately by selecting its directory as `-root`.
 
 Configured call rules describe typed SQL or event API signatures. Argument indexes exclude a method receiver; `handler_argument` is valid for `event_subscribe`.
 

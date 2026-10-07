@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -294,14 +295,40 @@ func Trace(ctx context.Context, o Options) (report Report, err error) {
 }
 
 func canonicalRoot(root string) (string, error) {
+	if runtime.GOOS == "windows" {
+		requested := root
+		if requested == "" {
+			requested = "."
+		}
+		requestedInfo, err := os.Stat(requested)
+		if err != nil {
+			return "", err
+		}
+		absolute, err := filepath.Abs(requested)
+		if err != nil {
+			return "", err
+		}
+		resolved, err := filepath.EvalSymlinks(absolute)
+		if err != nil {
+			return "", err
+		}
+		absolute, err = filepath.Abs(resolved)
+		if err != nil {
+			return "", err
+		}
+		canonical := filepath.Clean(absolute)
+		canonicalInfo, err := os.Stat(canonical)
+		if err != nil {
+			return "", err
+		}
+		if !os.SameFile(requestedInfo, canonicalInfo) {
+			return "", fmt.Errorf("root %q does not resolve to the directory selected by the operating system", root)
+		}
+		return canonical, nil
+	}
+
 	path := root
 	if !filepath.IsAbs(root) {
-		if len(root) > 0 && os.IsPathSeparator(root[0]) {
-			return "", fmt.Errorf("root %q is rooted without a volume; use an absolute path", root)
-		}
-		if filepath.VolumeName(root) != "" {
-			return "", fmt.Errorf("drive-relative root %q is unsupported; use an absolute path", root)
-		}
 		workingDirectory, err := os.Getwd()
 		if err != nil {
 			return "", err
