@@ -138,6 +138,9 @@ func run() int {
 		}
 	} else {
 		r, err = trace.Trace(ctx, options)
+		if err == nil {
+			err = rejectReportInputWrites(r, analysisArtifactPath{flag: "output", path: *output})
+		}
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

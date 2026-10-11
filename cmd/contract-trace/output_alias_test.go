@@ -316,6 +316,7 @@ func TestWindowsUnusualOutputNamesCannotReplaceNewAnalysis(t *testing.T) {
 type cliResult struct {
 	err    error
 	stderr string
+	stdout string
 }
 
 func runCLI(t *testing.T, args ...string) cliResult {
@@ -349,10 +350,14 @@ func runCLI(t *testing.T, args ...string) cliResult {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code != 0 {
-		return cliResult{err: fmt.Errorf("run returned %d", code), stderr: string(message)}
+	output, err := os.ReadFile(stdout.Name())
+	if err != nil {
+		t.Fatal(err)
 	}
-	return cliResult{stderr: string(message)}
+	if code != 0 {
+		return cliResult{err: fmt.Errorf("run returned %d", code), stderr: string(message), stdout: string(output)}
+	}
+	return cliResult{stderr: string(message), stdout: string(output)}
 }
 
 func writeCLIInput(t *testing.T, root string) {
