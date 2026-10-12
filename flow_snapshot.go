@@ -31,6 +31,14 @@ func snapshotFlow(source flowValue) flowValue {
 	} else {
 		result.zeroAggregates = nil
 	}
+	if len(source.addressAlternatives) != 0 {
+		result.addressAlternatives = make(map[string]typedAddressAlternative, len(source.addressAlternatives))
+		for address, alternative := range source.addressAlternatives {
+			result.addressAlternatives[address] = alternative
+		}
+	} else {
+		result.addressAlternatives = nil
+	}
 	result.effects = snapshotCandidates(source.effects)
 	if len(source.errors) != 0 {
 		result.errors = snapshotCandidates(source.errors)

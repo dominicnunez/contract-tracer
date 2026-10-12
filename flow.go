@@ -34,8 +34,17 @@ type flowValue struct {
 	functionNil          bool
 	zeroAggregates       map[types.Type]bool
 	zeroAggregateUnknown bool
+	mapNil               bool
 	interfaceUnknown     bool
 	stringUnknown        bool
+	addressAlternatives  map[string]typedAddressAlternative
+	addressAltUnknown    bool
+}
+
+type typedAddressAlternative struct {
+	typ     types.Type
+	zero    bool
+	unknown bool
 }
 
 type boundReceiverCandidates struct {
@@ -200,21 +209,25 @@ func (a *flowAnalysis) merge(dst *flowValue, src flowValue) bool {
 		unknownFunction := dst.functionUnknown
 		nilFunction := dst.functionNil
 		unknownInterface := dst.interfaceUnknown
+		nilMap := dst.mapNil
 		unknownString := dst.stringUnknown
 		errorOrigins := dst.errors
 		scalarOrigins, unknownScalar := dst.scalars, dst.scalarUnknown
 		boundReceivers, unknownBoundReceiver := dst.boundReceivers, dst.boundReceiverUnknown
 		zeroAggregates, unknownZeroAggregate := dst.zeroAggregates, dst.zeroAggregateUnknown
+		addressAlternatives, unknownAddressAlternative := dst.addressAlternatives, dst.addressAltUnknown
 		*dst = emptyFlow()
 		dst.sqlUnknown = unknown
 		dst.functionUnknown = unknownFunction
 		dst.functionNil = nilFunction
 		dst.interfaceUnknown = unknownInterface
+		dst.mapNil = nilMap
 		dst.stringUnknown = unknownString
 		dst.errors = errorOrigins
 		dst.scalars, dst.scalarUnknown = scalarOrigins, unknownScalar
 		dst.boundReceivers, dst.boundReceiverUnknown = boundReceivers, unknownBoundReceiver
 		dst.zeroAggregates, dst.zeroAggregateUnknown = zeroAggregates, unknownZeroAggregate
+		dst.addressAlternatives, dst.addressAltUnknown = addressAlternatives, unknownAddressAlternative
 	}
 	if src.scalarUnknown && !dst.scalarUnknown {
 		dst.scalarUnknown = true
@@ -253,6 +266,18 @@ func (a *flowAnalysis) merge(dst *flowValue, src flowValue) bool {
 	if src.zeroAggregateUnknown && !dst.zeroAggregateUnknown {
 		dst.zeroAggregateUnknown = true
 		changed = true
+	}
+	if src.mapNil && !dst.mapNil {
+		dst.mapNil = true
+		changed = true
+	}
+	if src.addressAltUnknown && !dst.addressAltUnknown {
+		dst.addressAltUnknown = true
+		changed = true
+	}
+	for _, address := range sortedKeys(src.addressAlternatives) {
+		incoming := src.addressAlternatives[address]
+		changed = a.addTypedAddressAlternative(dst, address, incoming.typ, incoming.zero, incoming.unknown) || changed
 	}
 	zeroTypes := make([]types.Type, 0, len(src.zeroAggregates))
 	for typ := range src.zeroAggregates {
@@ -412,7 +437,7 @@ func (a *flowAnalysis) get(v ssa.Value) flowValue {
 			// These values add intrinsic candidates before bounded merging.
 		default:
 			stored := a.values[v]
-			if len(stored.strings) <= maxFlowValues && len(stored.functions) <= maxFlowValues && len(stored.addresses) <= maxFlowValues && len(stored.boundReceivers) <= maxFlowValues && len(stored.effects) <= maxFlowValues && len(stored.errors) <= maxFlowValues && len(stored.scalars) <= maxFlowValues && len(stored.zeroAggregates) <= maxFlowValues {
+			if len(stored.strings) <= maxFlowValues && len(stored.functions) <= maxFlowValues && len(stored.addresses) <= maxFlowValues && len(stored.boundReceivers) <= maxFlowValues && len(stored.effects) <= maxFlowValues && len(stored.errors) <= maxFlowValues && len(stored.scalars) <= maxFlowValues && len(stored.zeroAggregates) <= maxFlowValues && len(stored.addressAlternatives) <= maxFlowValues {
 				return snapshotFlow(stored)
 			}
 		}
@@ -423,6 +448,11 @@ func (a *flowAnalysis) get(v ssa.Value) flowValue {
 	}
 	switch x := v.(type) {
 	case *ssa.Const:
+		if x.IsNil() && x.Type() != nil {
+			if _, ok := types.Unalias(x.Type()).Underlying().(*types.Map); ok {
+				result.mapNil = true
+			}
+		}
 		if x.IsNil() && isSQLHandleType(x.Type()) {
 			result.sqlUnknown = true
 		}
@@ -672,9 +702,11 @@ func (ix *index) analyzeFlow(ctx context.Context, prog *ssa.Program, graph *call
 					case *ssa.ChangeType:
 						a.merge(&result, a.get(v.X))
 						a.merge(&result, a.retypeZeroAggregate(a.get(v.X), v.X.Type(), v.Type()))
+						retypeAddressAlternatives(&result, v.X.Type(), v.Type())
 					case *ssa.Convert:
 						a.merge(&result, a.get(v.X))
 						a.merge(&result, a.retypeZeroAggregate(a.get(v.X), v.X.Type(), v.Type()))
+						retypeAddressAlternatives(&result, v.X.Type(), v.Type())
 					case *ssa.ChangeInterface:
 						a.merge(&result, a.get(v.X))
 					case *ssa.MakeInterface:
@@ -691,15 +723,30 @@ func (ix *index) analyzeFlow(ctx context.Context, prog *ssa.Program, graph *call
 						if pointer, ok := parentType.Underlying().(*types.Pointer); ok {
 							parentType = types.Unalias(pointer.Elem())
 						}
-						if inlineAggregate(parentType) {
-							a.merge(&result, a.zeroAggregateField(a.get(v.X), parentType, v.Field))
+						var childType types.Type
+						if structure, ok := types.Unalias(parentType).Underlying().(*types.Struct); ok && v.Field >= 0 && v.Field < structure.NumFields() {
+							childType = structure.Field(v.Field).Type()
+						}
+						legacyChildProjection := isFunctionType(childType) || inlineAggregate(childType)
+						addressPayload := carriesTypedAddressAlternative(childType)
+						parentValue := a.get(v.X)
+						if inlineAggregate(parentType) && legacyChildProjection {
+							a.merge(&result, a.zeroAggregateField(parentValue, parentType, v.Field))
 						}
 						for _, p := range a.recordAddresses(v.X) {
-							if inlineAggregate(parentType) {
-								a.merge(&result, a.zeroAggregateField(a.get(v.X), parentType, v.Field))
-								a.merge(&result, a.zeroAggregateField(a.memory[p], parentType, v.Field))
-							}
 							address := fmt.Sprintf("%s.field:%d", p, v.Field)
+							if inlineAggregate(parentType) {
+								for _, source := range []flowValue{parentValue, a.memory[p]} {
+									if legacyChildProjection {
+										a.merge(&result, a.zeroAggregateField(source, parentType, v.Field))
+									}
+									if addressPayload {
+										if pointer, ok := types.Unalias(v.Type()).Underlying().(*types.Pointer); ok {
+											a.addTypedAddressAlternative(&result, address, pointer.Elem(), exactZeroAggregateMatches(source, parentType), source.zeroAggregateUnknown)
+										}
+									}
+								}
+							}
 							result.addresses[address] = true
 							if pointer, ok := v.Type().Underlying().(*types.Pointer); ok && isFunctionType(pointer.Elem()) && a.zeroFunctionFieldAtAddress(address, ix) {
 								if a.zeroFunctionFields == nil {
@@ -712,15 +759,56 @@ func (ix *index) analyzeFlow(ctx context.Context, prog *ssa.Program, graph *call
 							}
 						}
 					case *ssa.IndexAddr:
+						_, parentArray := types.Unalias(v.X.Type()).Underlying().(*types.Array)
+						pointerArray := aggregateSequenceStorageType(v.X.Type(), "", nil) != nil && !parentArray
+						var childType types.Type
+						if pointer, ok := types.Unalias(v.Type()).Underlying().(*types.Pointer); ok {
+							childType = pointer.Elem()
+						}
+						legacyChildProjection := isFunctionType(childType) || inlineAggregate(childType)
+						addressPayload := carriesTypedAddressAlternative(childType)
+						sequenceValue := a.get(v.X)
 						for _, p := range a.recordAddresses(v.X) {
 							address := p + ".element"
 							result.addresses[address] = true
-							if pointer, ok := v.Type().Underlying().(*types.Pointer); ok && inlineAggregate(pointer.Elem()) {
-								a.merge(&result, aggregateSelectedElement(a, a.get(v.X), v.X.Type(), p))
+							if pointerArray {
+								for _, source := range []flowValue{sequenceValue, a.memory[p]} {
+									projected := aggregateSelectedElement(a, source, v.X.Type(), p)
+									if legacyChildProjection {
+										a.merge(&result, projected)
+									}
+									storageType := aggregateSequenceStorageType(v.X.Type(), p, a.addressTypes)
+									if addressPayload && storageType != nil {
+										if pointer, ok := types.Unalias(v.Type()).Underlying().(*types.Pointer); ok {
+											a.addTypedAddressAlternative(&result, address, pointer.Elem(), exactZeroAggregateMatches(source, storageType), source.zeroAggregateUnknown)
+										}
+									}
+								}
+							}
+							if parentArray {
+								if pointer, ok := types.Unalias(v.Type()).Underlying().(*types.Pointer); ok {
+									storageType := types.Unalias(v.X.Type())
+									for _, source := range []flowValue{sequenceValue, a.memory[p]} {
+										projected := aggregateSelectedElement(a, source, v.X.Type(), p)
+										if legacyChildProjection {
+											a.merge(&result, projected)
+										}
+										if addressPayload {
+											a.addTypedAddressAlternative(&result, address, pointer.Elem(), exactZeroAggregateMatches(source, storageType), source.zeroAggregateUnknown)
+										}
+									}
+								}
+							}
+							if pointer, ok := v.Type().Underlying().(*types.Pointer); ok && inlineAggregate(pointer.Elem()) && !parentArray {
+								a.merge(&result, aggregateSelectedElement(a, sequenceValue, v.X.Type(), p))
 							}
 							if pointer, ok := v.Type().Underlying().(*types.Pointer); ok && isFunctionType(pointer.Elem()) {
 								a.merge(&result, a.functionElementValue(v.X, p, address, ix))
 							}
+						}
+						if parentArray && legacyChildProjection {
+							projected := aggregateSelectedElement(a, sequenceValue, v.X.Type(), "")
+							a.merge(&result, projected)
 						}
 						if pointer, ok := v.Type().Underlying().(*types.Pointer); ok && inlineAggregate(pointer.Elem()) {
 							sequence, isSlice := types.Unalias(v.X.Type()).Underlying().(*types.Slice)
@@ -735,16 +823,27 @@ func (ix *index) analyzeFlow(ctx context.Context, prog *ssa.Program, graph *call
 							}
 						}
 					case *ssa.Index:
+						_, parentArray := types.Unalias(v.X.Type()).Underlying().(*types.Array)
+						pointerArray := aggregateSequenceStorageType(v.X.Type(), "", nil) != nil && !parentArray
 						for _, p := range a.recordAddresses(v.X) {
 							address := p + ".element"
 							a.merge(&result, a.memory[address])
+							if pointerArray {
+								a.merge(&result, aggregateSelectedElement(a, a.get(v.X), v.X.Type(), p))
+								a.merge(&result, aggregateSelectedElement(a, a.memory[p], v.X.Type(), p))
+							}
 							if isFunctionType(v.Type()) {
 								a.merge(&result, a.functionElementValue(v.X, p, address, ix))
 							}
 							if inlineAggregate(v.Type()) {
 								result.addresses[address] = true
-								a.merge(&result, aggregateSelectedElement(a, a.get(v.X), v.X.Type(), p))
+								if !parentArray {
+									a.merge(&result, aggregateSelectedElement(a, a.get(v.X), v.X.Type(), p))
+								}
 							}
+						}
+						if parentArray {
+							a.merge(&result, aggregateSelectedElement(a, a.get(v.X), v.X.Type(), ""))
 						}
 						if inlineAggregate(v.Type()) {
 							if sequence, ok := types.Unalias(v.X.Type()).Underlying().(*types.Slice); ok {
@@ -802,8 +901,10 @@ func (ix *index) analyzeFlow(ctx context.Context, prog *ssa.Program, graph *call
 							result, _, _ = a.receiveWithClosedChannelValue(v.X, a.channelClosures)
 						}
 						if v.Op == token.MUL {
+							pointerValue := a.get(v.X)
 							for _, p := range sortedKeys(a.get(v.X).addresses) {
 								a.merge(&result, a.memory[p])
+								a.projectTypedAddressAlternative(&result, pointerValue, p, v.Type())
 								if isFunctionType(v.Type()) {
 									a.addGlobalFunctionState(&result, p, ix)
 									if a.zeroFunctionFields[p] || a.zeroFunctionArrayElements[p] || a.get(v.X).functionNil {
@@ -824,6 +925,7 @@ func (ix *index) analyzeFlow(ctx context.Context, prog *ssa.Program, graph *call
 									}
 								}
 							}
+							propagateIndirectAlternative(&result, pointerValue, v.Type())
 						}
 					case *ssa.BinOp:
 						a.mergeScalar(&result, a.get(v.X))

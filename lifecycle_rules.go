@@ -354,7 +354,7 @@ func (a *flowAnalysis) configuredLifecycleUse(call ssa.CallInstruction, from str
 				candidates = value.strings
 			}
 			resolved := false
-			outside := value.interfaceUnknown || value.sqlUnknown || value.functionUnknown
+			outside := value.interfaceUnknown || value.sqlUnknown || value.functionUnknown || value.mapNil
 			for _, candidate := range sortedKeys(candidates) {
 				resolved = true
 				outside = outside || strings.HasPrefix(candidate, "input:") || a.inputRoots[candidate]
@@ -365,7 +365,7 @@ func (a *flowAnalysis) configuredLifecycleUse(call ssa.CallInstruction, from str
 				ix.callEdge(from, key, "lifecycle_"+rule.Role, "possible", call)
 			}
 			if !resolved || outside || rule.Identity == "value" && value.stringUnknown {
-				ix.boundaries = append(ix.boundaries, Boundary{Node: from, Kind: "unresolved_lifecycle_resource", Reason: symbol + ": configured resource candidates are missing or include outside values; ownership and runtime identity remain unresolved", Evidence: ix.callEvidence(call)})
+				ix.boundaries = append(ix.boundaries, Boundary{Node: from, Kind: "unresolved_lifecycle_resource", Reason: symbol + ": configured resource candidates are missing or include nil or outside values; ownership and runtime identity remain unresolved", Evidence: ix.callEvidence(call)})
 			}
 		}
 	}

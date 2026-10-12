@@ -20,7 +20,7 @@ func TestFlowReadSnapshotIsolationAndAllocationBound(t *testing.T) {
 	source := emptyFlow()
 	source.errors = map[string]bool{}
 	source.scalars = map[string]bool{}
-	source.sqlUnknown, source.functionUnknown, source.functionNil, source.interfaceUnknown, source.stringUnknown, source.scalarUnknown = true, true, true, true, true, true
+	source.sqlUnknown, source.functionUnknown, source.functionNil, source.interfaceUnknown, source.stringUnknown, source.scalarUnknown, source.mapNil = true, true, true, true, true, true, true
 	for i := 0; i < 64; i++ {
 		key := fmt.Sprintf("origin-%d", i)
 		source.strings[key], source.addresses[key], source.effects[key], source.errors[key], source.scalars[key] = true, true, true, true, true
@@ -28,7 +28,7 @@ func TestFlowReadSnapshotIsolationAndAllocationBound(t *testing.T) {
 	}
 	a := &flowAnalysis{values: map[ssa.Value]flowValue{value: source}}
 	first := a.get(value)
-	if !first.sqlUnknown || !first.functionUnknown || !first.functionNil || !first.interfaceUnknown || !first.stringUnknown || !first.scalarUnknown {
+	if !first.sqlUnknown || !first.functionUnknown || !first.functionNil || !first.interfaceUnknown || !first.stringUnknown || !first.scalarUnknown || !first.mapNil {
 		t.Fatal("snapshot lost unresolved domains")
 	}
 	for name, candidates := range map[string]map[string]bool{"strings": first.strings, "addresses": first.addresses, "effects": first.effects, "errors": first.errors, "scalars": first.scalars} {
@@ -55,6 +55,185 @@ func TestFlowReadSnapshotIsolationAndAllocationBound(t *testing.T) {
 	t.Logf("64 candidates in all six domains: %.0f allocations per isolated read", allocations)
 	if allocations > 24 {
 		t.Errorf("bounded snapshot read rebuilds candidates excessively: %.0f allocations, budget 24", allocations)
+	}
+}
+
+func TestMapNilFlowMergeAndSnapshot(t *testing.T) {
+	analysis := &flowAnalysis{}
+	var merged flowValue
+	nilMap := emptyFlow()
+	nilMap.mapNil = true
+	if !analysis.merge(&merged, nilMap) || !merged.mapNil {
+		t.Fatal("first nil-map candidate did not initialize and change the destination")
+	}
+	if analysis.merge(&merged, nilMap) {
+		t.Fatal("remerging the same nil-map candidate reported a change")
+	}
+	copy := snapshotFlow(merged)
+	if !copy.mapNil {
+		t.Fatal("flow snapshot lost the nil-map candidate")
+	}
+	known := emptyFlow()
+	known.addresses["map:known"] = true
+	analysis.merge(&copy, known)
+	if !copy.mapNil || !copy.addresses["map:known"] || merged.addresses["map:known"] {
+		t.Fatal("map candidates did not remain independent after snapshot")
+	}
+}
+
+func TestTypedAddressAlternativeMergeAndSnapshot(t *testing.T) {
+	analysis := &flowAnalysis{}
+	loadedType := types.NewPointer(types.Typ[types.Int])
+	var merged flowValue
+	unknown := emptyFlow()
+	unknown.addressAlternatives = map[string]typedAddressAlternative{
+		"record.field:0": {typ: loadedType, unknown: true},
+	}
+	if !analysis.merge(&merged, unknown) {
+		t.Fatal("initial typed address alternative did not change the destination")
+	}
+	zero := emptyFlow()
+	zero.addressAlternatives = map[string]typedAddressAlternative{
+		"record.field:0": {typ: loadedType, zero: true},
+	}
+	if !analysis.merge(&merged, zero) {
+		t.Fatal("known zero candidate did not join existing address uncertainty")
+	}
+	got := merged.addressAlternatives["record.field:0"]
+	if !got.zero || !got.unknown || !types.Identical(got.typ, loadedType) {
+		t.Fatalf("address candidates were not preserved monotonically: %+v", got)
+	}
+
+	snapshot := snapshotFlow(merged)
+	delete(snapshot.addressAlternatives, "record.field:0")
+	if _, ok := merged.addressAlternatives["record.field:0"]; !ok {
+		t.Fatal("address alternative snapshot shared its map with storage")
+	}
+	empty := emptyFlow()
+	empty.addressAlternatives = map[string]typedAddressAlternative{}
+	emptySnapshot := snapshotFlow(empty)
+	if emptySnapshot.addressAlternatives != nil {
+		emptySnapshot.addressAlternatives["new"] = typedAddressAlternative{typ: loadedType, unknown: true}
+	}
+	if len(empty.addressAlternatives) != 0 {
+		t.Fatal("empty address alternative snapshot shared its map with storage")
+	}
+}
+
+func TestTypedAddressAlternativeMixedStateIsAbsorbing(t *testing.T) {
+	intPointer := types.NewPointer(types.Typ[types.Int])
+	stringPointer := types.NewPointer(types.Typ[types.String])
+	for _, order := range [][]typedAddressAlternative{
+		{{typ: intPointer, zero: true}, {typ: stringPointer, zero: true}},
+		{{typ: stringPointer, zero: true}, {typ: intPointer, zero: true}},
+	} {
+		analysis := &flowAnalysis{}
+		var merged flowValue
+		for _, incoming := range order {
+			value := emptyFlow()
+			value.addressAlternatives = map[string]typedAddressAlternative{"field": incoming}
+			analysis.merge(&merged, value)
+		}
+		mixed := merged.addressAlternatives["field"]
+		if mixed.typ != nil || mixed.zero || !mixed.unknown {
+			t.Fatalf("conflicting types did not become unknown-only: %+v", mixed)
+		}
+		if analysis.merge(&merged, merged) {
+			t.Fatal("remerging mixed address metadata changed the destination")
+		}
+		later := emptyFlow()
+		later.addressAlternatives = map[string]typedAddressAlternative{"field": {typ: intPointer, zero: true}}
+		if analysis.merge(&merged, later) {
+			t.Fatal("mixed address metadata was narrowed by a later concrete candidate")
+		}
+		mixed = merged.addressAlternatives["field"]
+		if mixed.typ != nil || mixed.zero || !mixed.unknown {
+			t.Fatalf("later candidate changed absorbing unknown-only state: %+v", mixed)
+		}
+		projected := emptyFlow()
+		analysis.projectTypedAddressAlternative(&projected, merged, "field", types.NewMap(types.Typ[types.String], types.Typ[types.Int]))
+		if projected.mapNil || !projected.interfaceUnknown {
+			t.Fatalf("conflicting loaded types fabricated a typed zero: %+v", projected)
+		}
+	}
+
+	for _, currentZero := range []bool{false, true} {
+		analysis := &flowAnalysis{}
+		current := emptyFlow()
+		current.addressAlternatives = map[string]typedAddressAlternative{
+			"slot": {typ: intPointer, zero: currentZero, unknown: true},
+		}
+		incoming := emptyFlow()
+		incoming.addressAlternatives = map[string]typedAddressAlternative{
+			"slot": {typ: nil, zero: true, unknown: true},
+		}
+		if !analysis.merge(&current, incoming) {
+			t.Fatalf("mixed incoming state did not change a concrete unknown destination (zero=%t)", currentZero)
+		}
+		got := current.addressAlternatives["slot"]
+		if got.typ != nil || got.zero || !got.unknown {
+			t.Fatalf("mixed incoming state was not stored as unknown-only (zero=%t): %+v", currentZero, got)
+		}
+		if analysis.merge(&current, incoming) {
+			t.Fatalf("remerging mixed state changed the destination (zero=%t)", currentZero)
+		}
+		if analysis.addTypedAddressAlternative(&current, "slot", intPointer, true, false) {
+			t.Fatalf("later concrete state narrowed mixed destination (zero=%t)", currentZero)
+		}
+	}
+
+	malformed := emptyFlow()
+	malformed.addressAlternatives = map[string]typedAddressAlternative{
+		"slot": {typ: nil, zero: true, unknown: true},
+	}
+	malformedAnalysis := &flowAnalysis{}
+	for _, typ := range []types.Type{
+		types.NewSignatureType(nil, nil, nil, nil, nil, false),
+		types.NewMap(types.Typ[types.String], types.Typ[types.Int]),
+		types.NewStruct(nil, nil),
+	} {
+		projected := emptyFlow()
+		malformedAnalysis.projectTypedAddressAlternative(&projected, malformed, "slot", typ)
+		if projected.functionNil || projected.mapNil || len(projected.zeroAggregates) != 0 ||
+			!projected.functionUnknown && !projected.interfaceUnknown && !projected.zeroAggregateUnknown {
+			t.Fatalf("malformed nil-typed alternative projected a typed zero: type=%v value=%+v", typ, projected)
+		}
+	}
+
+	analysis := &flowAnalysis{}
+	var bounded flowValue
+	for i := 0; i < maxFlowValues; i++ {
+		address := fmt.Sprintf("field:%02d", i)
+		if !analysis.addTypedAddressAlternative(&bounded, address, intPointer, true, false) {
+			t.Fatalf("candidate %d did not change bounded metadata", i)
+		}
+	}
+	if !analysis.addTypedAddressAlternative(&bounded, "field:overflow", intPointer, true, false) || !bounded.addressAltUnknown || !analysis.coverage.Widened {
+		t.Fatal("overflow did not retain a widening alternative")
+	}
+	if analysis.addTypedAddressAlternative(&bounded, "field:overflow-again", intPointer, true, false) {
+		t.Fatal("repeated overflow changed an already widened state")
+	}
+}
+
+func TestTypedAddressAlternativeRetypesAcrossPointerConversion(t *testing.T) {
+	base := types.NewInterfaceType(nil, nil).Complete()
+	named := types.NewNamed(types.NewTypeName(token.NoPos, nil, "contextSlot", nil), base, nil)
+	from, to := types.NewPointer(base), types.NewPointer(named)
+	if !types.ConvertibleTo(from, to) {
+		t.Fatal("fixture pointer conversion is not valid Go")
+	}
+	value := emptyFlow()
+	value.addresses["record.field:0"] = true
+	value.addressAlternatives = map[string]typedAddressAlternative{"record.field:0": {typ: base, unknown: true}}
+	retypeAddressAlternatives(&value, from, to)
+	if alternative := value.addressAlternatives["record.field:0"]; !types.Identical(alternative.typ, named) || !alternative.unknown || alternative.zero {
+		t.Fatalf("address alternative did not follow the valid pointer conversion: %+v", alternative)
+	}
+	projected := emptyFlow()
+	(&flowAnalysis{}).projectTypedAddressAlternative(&projected, value, "record.field:0", named)
+	if !projected.interfaceUnknown {
+		t.Fatal("converted typed alternative was not projected on the matching dereference")
 	}
 }
 

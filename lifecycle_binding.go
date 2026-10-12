@@ -98,7 +98,7 @@ func (a *flowAnalysis) modelLifecycleBinding(closure *ssa.MakeClosure, result *f
 				for _, candidate := range sortedKeys(candidates) {
 					result.effects["lifecycle-bound:"+id+":"+candidate] = true
 				}
-				if value.stringUnknown || value.interfaceUnknown || value.sqlUnknown || value.functionUnknown {
+				if value.stringUnknown || value.interfaceUnknown || value.sqlUnknown || value.functionUnknown || value.mapNil {
 					result.effects["lifecycle-bound-unknown:"+id] = true
 				}
 			}
@@ -217,7 +217,7 @@ func (a *flowAnalysis) emitBoundLifecycleRole(call ssa.CallInstruction, from str
 		candidates = selected.strings
 	}
 	resolved := false
-	outside := selected.interfaceUnknown || selected.sqlUnknown || selected.functionUnknown
+	outside := selected.interfaceUnknown || selected.sqlUnknown || selected.functionUnknown || selected.mapNil
 	if rule.Identity == "value" {
 		outside = outside || selected.stringUnknown
 	}
@@ -231,7 +231,7 @@ func (a *flowAnalysis) emitBoundLifecycleRole(call ssa.CallInstruction, from str
 		ix.callEdge(from, key, "lifecycle_"+rule.Role, "possible", call)
 	}
 	if !resolved || outside {
-		ix.boundaries = append(ix.boundaries, Boundary{Node: from, Kind: "unresolved_lifecycle_resource", Reason: fmt.Sprintf("%s bound selector candidates are missing or include outside values; ownership and dispatch remain unresolved", rule.Symbol), Evidence: ix.callEvidence(call)})
+		ix.boundaries = append(ix.boundaries, Boundary{Node: from, Kind: "unresolved_lifecycle_resource", Reason: fmt.Sprintf("%s bound selector candidates are missing or include nil or outside values; ownership and dispatch remain unresolved", rule.Symbol), Evidence: ix.callEvidence(call)})
 	}
 }
 

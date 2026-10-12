@@ -116,7 +116,14 @@ func isMapValue(value ssa.Value) bool {
 	if value == nil || value.Type() == nil {
 		return false
 	}
-	_, ok := value.Type().Underlying().(*types.Map)
+	return isMapType(value.Type())
+}
+
+func isMapType(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	_, ok := types.Unalias(t).Underlying().(*types.Map)
 	return ok
 }
 
@@ -219,9 +226,14 @@ func (a *flowAnalysis) mapKeys(value ssa.Value) []string {
 }
 func (a *flowAnalysis) mapLookup(value, key ssa.Value) flowValue {
 	result := emptyFlow()
-	for _, p := range sortedKeys(a.get(value).addresses) {
+	mapFlow := a.get(value)
+	mapType, isMap := types.Unalias(value.Type()).Underlying().(*types.Map)
+	if !isMap {
+		return result
+	}
+	keys := a.mapKeys(key)
+	for _, p := range sortedKeys(mapFlow.addresses) {
 		prefix := p + ".key:"
-		keys := a.mapKeys(key)
 		for _, k := range keys {
 			if k == "*" {
 				for _, address := range sortedKeys(a.mapEntries[p]) {
@@ -231,30 +243,59 @@ func (a *flowAnalysis) mapLookup(value, key ssa.Value) flowValue {
 				a.merge(&result, a.memory[prefix+k])
 			}
 			a.merge(&result, a.memory[prefix+"*"])
-			mapType, isMap := value.Type().Underlying().(*types.Map)
-			if isMap && isFunctionType(mapType.Elem()) {
-				if !a.mapClosed[p] {
-					result.functionUnknown = true
-				} else if a.mapOpen[p] {
-					result.functionUnknown = true
-					result.functionNil = true
-				} else if k == "*" && !a.mapEntries[p][prefix+"*"] {
-					result.functionNil = true
-				} else if k != "*" && !a.mapEntries[p][prefix+k] && !a.mapEntries[p][prefix+"*"] {
-					result.functionNil = true
-				}
-			} else if isMap && inlineAggregate(mapType.Elem()) {
-				missing := k == "*" && !a.mapEntries[p][prefix+"*"] || k != "*" && !a.mapEntries[p][prefix+k] && !a.mapEntries[p][prefix+"*"]
-				if a.mapClosed[p] && (missing || a.mapOpen[p]) {
-					a.addZeroAggregate(&result, mapType.Elem())
-				}
-				if a.mapOpen[p] || !a.mapClosed[p] {
-					a.markZeroAggregateUnknown(&result)
-				}
-			}
+			missing := (k == "*" && !a.mapEntries[p][prefix+"*"]) ||
+				(k != "*" && !a.mapEntries[p][prefix+k] && !a.mapEntries[p][prefix+"*"])
+			zeroAlternative := a.mapClosed[p] && (missing || a.mapOpen[p])
+			unknownAlternative := !a.mapClosed[p] || a.mapOpen[p]
+			addTypedAlternative(a, &result, mapType.Elem(), zeroAlternative, unknownAlternative)
 		}
 	}
+	if mapFlow.mapNil {
+		addTypedAlternative(a, &result, mapType.Elem(), true, false)
+	}
+	if mapFlow.interfaceUnknown {
+		addTypedAlternative(a, &result, mapType.Elem(), false, true)
+	}
 	return result
+}
+
+func addTypedAlternative(a *flowAnalysis, value *flowValue, element types.Type, zero, unknown bool) {
+	if value == nil || (!zero && !unknown) {
+		return
+	}
+	switch {
+	case isFunctionType(element):
+		value.functionNil = value.functionNil || zero
+		value.functionUnknown = value.functionUnknown || unknown
+	case inlineAggregate(element):
+		if zero {
+			a.addZeroAggregate(value, element)
+		}
+		if unknown {
+			a.markZeroAggregateUnknown(value)
+		}
+	case isSQLHandleType(element):
+		value.sqlUnknown = true
+	case isMapType(element):
+		value.mapNil = value.mapNil || zero
+		value.interfaceUnknown = value.interfaceUnknown || unknown
+	default:
+		markMapElementAlternative(value, element, true)
+	}
+}
+
+func markMapElementAlternative(value *flowValue, element types.Type, possible bool) {
+	if !possible {
+		return
+	}
+	if isSQLHandleType(element) {
+		value.sqlUnknown = true
+		return
+	}
+	switch types.Unalias(element).Underlying().(type) {
+	case *types.Pointer, *types.Interface, *types.Chan, *types.Map, *types.Slice:
+		value.interfaceUnknown = true
+	}
 }
 
 // SSA Next slots are (ok, key, value). Each iteration retains an unordered
