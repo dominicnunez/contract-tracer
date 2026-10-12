@@ -161,7 +161,7 @@ func SQLFamily() {
 	interfaceOperation := ""
 	interfaceBoundary := false
 	for _, edge := range report.Relationships {
-		if edge.Kind == "sql_operation" && strings.Contains(edge.Evidence.Snippet, "preparer.Prepare(query)") {
+		if edge.Kind == "sql_operation" && strings.HasSuffix(edge.From, "::PrepareThroughInterface") && strings.Contains(edge.Evidence.Snippet, "preparer.Prepare(query)") {
 			interfaceOperation = edge.To
 		}
 	}

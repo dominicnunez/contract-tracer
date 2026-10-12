@@ -504,7 +504,7 @@ func (ix *index) analyzeFlow(ctx context.Context, prog *ssa.Program, graph *call
 			continue
 		}
 		for _, edge := range node.Out {
-			if edge.Site == nil || !edge.Site.Common().IsInvoke() || ix.owner(edge.Callee.Func) == "" {
+			if edge.Site == nil || !edge.Site.Common().IsInvoke() {
 				continue
 			}
 			common := edge.Site.Common()
@@ -1228,7 +1228,7 @@ func (ix *index) analyzeFlow(ctx context.Context, prog *ssa.Program, graph *call
 					a.sqlHandleUse(call, ix)
 					a.waitGroupUse(call, ix)
 					a.cleanupUse(call, ix)
-					if call.Common().IsInvoke() && len(a.targets(call.Common())) == 0 {
+					if call.Common().IsInvoke() && !hasIndexedInvokeTarget(a.targets(call.Common()), ix) {
 						ix.boundaries = append(ix.boundaries, Boundary{Node: from, Kind: "unresolved_interface_flow", Reason: "no local implementation body modeled for interface method " + call.Common().Method.Name() + "; dependency bodies or runtime implementations can supply additional values", Evidence: ix.callEvidence(call)})
 					}
 					for _, target := range sortedFunctions(a.targets(call.Common())) {
@@ -1323,6 +1323,14 @@ func (ix *index) analyzeFlow(ctx context.Context, prog *ssa.Program, graph *call
 	ix.boundaries = append(ix.boundaries, Boundary{Kind: "interface_flow_model", Reason: "Interface values propagate through local CHA implementation candidates, including receiver and result slots. Candidate implementations are not filtered by runtime receiver type; dependency bodies and implementations outside the loaded type universe can add behavior."})
 	a.configuredLifecycleBoundaries(ix, config)
 	return a, nil
+}
+func hasIndexedInvokeTarget(targets map[*ssa.Function]bool, ix *index) bool {
+	for target := range targets {
+		if ix.owner(target) != "" {
+			return true
+		}
+	}
+	return false
 }
 func (a *flowAnalysis) targets(c *ssa.CallCommon) map[*ssa.Function]bool {
 	if target := c.StaticCallee(); target != nil {
